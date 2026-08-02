@@ -516,6 +516,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           <button
             key={item}
             className="tab"
+            aria-label={item}
             data-active={tab === item}
             onClick={() => {
               setTab(item);
