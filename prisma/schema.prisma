@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SessionStatus {
+  SETUP
+  ACTIVE
+  COMPLETE
+}
+enum SessionFormat {
+  WINNER_STAYS
+  KNOCKOUT
+  ROUND_ROBIN
+  GROUPS_KNOCKOUT
+}
+enum MatchStatus {
+  PENDING
+  LIVE
+  AWAITING_CONFIRMATION
+  CONFIRMED
+}
+enum InputMode {
+  POINTS
+  GAMES
+}
+enum GameRule {
+  ADVANTAGE
+  GOLDEN_POINT
+}
+enum ScoreEventType {
+  POINT
+  TEAM_GAME
+  TIEBREAK_GAME
+  UNDO
+}
+
+model List {
+  id String @id @default(cuid())
+  name String
+  createdAt DateTime @default(now())
+  players Player[]
+  sessions Session[]
+}
+model Player {
+  id String @id @default(cuid())
+  listId String
+  name String
+  rating Decimal @db.Decimal(3,1)
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  list List @relation(fields:[listId], references:[id], onDelete: Cascade)
+  snapshots Participant[]
+  @@index([listId, active])
+}
+model Session {
+  id String @id @default(cuid())
+  listId String
+  name String
+  format SessionFormat
+  status SessionStatus @default(SETUP)
+  gameRule GameRule @default(ADVANTAGE)
+  inputMode InputMode @default(POINTS)
+  scoringPreset String @default("BEST_OF_3_STANDARD")
+  progression Json?
+  createdAt DateTime @default(now())
+  startedAt DateTime?
+  completedAt DateTime?
+  list List @relation(fields:[listId], references:[id], onDelete: Cascade)
+  participants Participant[]
+  teams Team[]
+  matches Match[]
+  @@index([listId, createdAt])
+}
+model Participant {
+  id String @id @default(cuid())
+  sessionId String
+  playerId String
+  playerName String
+  rating Decimal @db.Decimal(3,1)
+  benched Boolean @default(false)
+  session Session @relation(fields:[sessionId], references:[id], onDelete: Cascade)
+  player Player @relation(fields:[playerId], references:[id])
+  teamMembers TeamMember[]
+  @@unique([sessionId, playerId])
+}
+model Team {
+  id String @id @default(cuid())
+  sessionId String
+  seed Int
+  name String
+  totalRating Decimal @db.Decimal(4,1)
+  session Session @relation(fields:[sessionId], references:[id], onDelete: Cascade)
+  members TeamMember[]
+  homeMatches Match[] @relation("homeTeam")
+  awayMatches Match[] @relation("awayTeam")
+  @@unique([sessionId, seed])
+}
+model TeamMember {
+  teamId String
+  participantId String
+  team Team @relation(fields:[teamId], references:[id], onDelete: Cascade)
+  participant Participant @relation(fields:[participantId], references:[id])
+  @@id([teamId, participantId])
+}
+model Match {
+  id String @id @default(cuid())
+  sessionId String
+  homeTeamId String
+  awayTeamId String
+  round Int @default(1)
+  sequence Int
+  status MatchStatus @default(PENDING)
+  revision Int @default(0)
+  startedAt DateTime?
+  endedAt DateTime?
+  winnerTeamId String?
+  score Json?
+  createdAt DateTime @default(now())
+  session Session @relation(fields:[sessionId], references:[id], onDelete: Cascade)
+  homeTeam Team @relation("homeTeam", fields:[homeTeamId], references:[id])
+  awayTeam Team @relation("awayTeam", fields:[awayTeamId], references:[id])
+  events ScoreEvent[]
+  result MatchResult?
+  @@index([sessionId, status])
+}
+model ScoreEvent {
+  id String @id @default(cuid())
+  matchId String
+  sequence Int
+  type ScoreEventType
+  winner Int?
+  createdAt DateTime @default(now())
+  match Match @relation(fields:[matchId], references:[id], onDelete: Cascade)
+  @@unique([matchId, sequence])
+}
+model MatchResult {
+  id String @id @default(cuid())
+  matchId String @unique
+  winnerTeamId String
+  homeGames Int
+  awayGames Int
+  pointMode Boolean
+  confirmedAt DateTime @default(now())
+  match Match @relation(fields:[matchId], references:[id], onDelete: Cascade)
+}
