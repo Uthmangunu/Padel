@@ -17,8 +17,8 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       {
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/padel?schema=public,
-        DIRECT_URL: postgresql://postgres:postgres@localhost:5432/padel?schema=public,
+        DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/padel?schema=public",
+        DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/padel?schema=public",
       }
     steps:
       - uses: actions/checkout@v4
