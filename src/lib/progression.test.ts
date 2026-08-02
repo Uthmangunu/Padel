@@ -172,4 +172,40 @@ describe("session progression", () => {
       ).map((row) => row.id),
     ).toEqual(["c", "a", "b"]);
   });
+  it("uses two-team head-to-head before seed", () => {
+    const seeds = new Map([
+      ["a", 1],
+      ["b", 2],
+    ]);
+    expect(
+      groupStandings(
+        ["a", "b"],
+        [
+          {
+            homeTeamId: "a",
+            awayTeamId: "b",
+            winnerTeamId: "b",
+            homeGames: 6,
+            awayGames: 6,
+          },
+        ],
+        seeds,
+      ).map((row) => row.id),
+    ).toEqual(["b", "a"]);
+  });
+  it("completes after a confirmed groups final instead of creating another final", async () => {
+    const tx = txFor({
+      id: "s",
+      format: "GROUPS_KNOCKOUT",
+      matches: [match({ status: "CONFIRMED", round: 3, winnerTeamId: "a" })],
+      teams: [team("a"), team("b")],
+    });
+    await advanceSession(tx, "s");
+    expect(tx.calls).toEqual([
+      {
+        op: "complete",
+        data: { status: "COMPLETE", completedAt: expect.any(Date) },
+      },
+    ]);
+  });
 });

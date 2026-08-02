@@ -100,6 +100,6 @@ describe("event-sourced scoring", () => {
       "BEST_OF_3_STANDARD",
       "ADVANTAGE",
     );
-    expect(s.setScores).toEqual([{ games: [7, 6], tiebreak: [7, 0] }]);
+    expect(s.setScores).toEqual([{ games: [7, 6], tiebreakWinner: 0 }]);
   });
 });

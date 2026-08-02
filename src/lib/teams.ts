@@ -17,69 +17,86 @@ export function buildBalancedTeams(
   excluded: string[][] = [],
 ): BuildResult {
   const sorted = [...players].sort((a, b) => b.rating - a.rating);
-  const force = new Map<string, string>(),
-    blocked = new Set<string>();
-  constraints.forEach((c) =>
-    c.type === "FORCE"
-      ? (force.set(c.playerA, c.playerB), force.set(c.playerB, c.playerA))
-      : blocked.add(key(c.playerA, c.playerB)),
+  const force = new Map<string, string>();
+  const blocked = new Set<string>();
+  constraints.forEach((constraint) =>
+    constraint.type === "FORCE"
+      ? (force.set(constraint.playerA, constraint.playerB),
+        force.set(constraint.playerB, constraint.playerA))
+      : blocked.add(key(constraint.playerA, constraint.playerB)),
   );
   for (const [a, b] of force)
     if (force.get(b) !== a || blocked.has(key(a, b)))
       throw new Error("Contradictory team constraints");
-  const benched = sorted.length % 2 ? [sorted.at(-1)!] : [];
-  const pool = sorted.slice(0, sorted.length - benched.length);
-  let best: BuiltTeam[] | undefined;
-  let bestGap = Infinity;
-  function walk(remaining: Candidate[], teams: BuiltTeam[]) {
-    if (!remaining.length) {
-      const signature = teams
-        .map((t) =>
-          t.members
-            .map((p) => p.id)
-            .sort()
-            .join("-"),
-        )
-        .sort();
-      const gap =
-        Math.max(...teams.map((t) => t.total)) -
-        Math.min(...teams.map((t) => t.total));
-      if (
-        gap < bestGap &&
-        !excluded.some((x) => x.join("|") === signature.join("|"))
-      ) {
-        bestGap = gap;
-        best = teams;
+  const benches =
+    sorted.length % 2
+      ? sorted.filter((candidate) => !force.has(candidate.id))
+      : [undefined];
+  let best: BuildResult | undefined;
+  for (const bench of benches) {
+    const pool = sorted.filter((candidate) => candidate !== bench);
+    let candidateBest: BuiltTeam[] | undefined;
+    let bestGap = Infinity;
+    const walk = (remaining: Candidate[], teams: BuiltTeam[]) => {
+      if (!remaining.length) {
+        const signature = signatureFor(teams);
+        const gap =
+          Math.max(...teams.map((team) => team.total)) -
+          Math.min(...teams.map((team) => team.total));
+        if (
+          gap < bestGap &&
+          !excluded.some((lineup) => lineup.join("|") === signature.join("|"))
+        ) {
+          bestGap = gap;
+          candidateBest = teams;
+        }
+        return;
       }
-      return;
-    }
-    const first = remaining[0];
-    for (let i = 1; i < remaining.length; i++) {
-      const second = remaining[i];
-      if (
-        (force.get(first.id) && force.get(first.id) !== second.id) ||
-        blocked.has(key(first.id, second.id))
-      )
-        continue;
-      const rest = remaining.filter((p) => p !== first && p !== second);
-      walk(rest, [
-        ...teams,
-        { members: [first, second], total: first.rating + second.rating },
-      ]);
+      const first = remaining[0];
+      const possible = remaining
+        .slice(1)
+        .filter(
+          (second) =>
+            (!force.get(first.id) || force.get(first.id) === second.id) &&
+            !blocked.has(key(first.id, second.id)),
+        )
+        .sort((a, b) => first.rating + a.rating - (first.rating + b.rating))
+        .slice(0, 6);
+      for (const second of possible)
+        walk(
+          remaining.filter(
+            (candidate) => candidate !== first && candidate !== second,
+          ),
+          [
+            ...teams,
+            { members: [first, second], total: first.rating + second.rating },
+          ],
+        );
+    };
+    walk(pool, []);
+    if (candidateBest) {
+      const result = {
+        teams: candidateBest,
+        benched: bench ? [bench] : [],
+        imbalance: bestGap,
+      };
+      if (!best || result.imbalance < best.imbalance) best = result;
     }
   }
-  walk(pool, []);
   if (!best)
     throw new Error("Constraints cannot produce valid two-player teams");
-  return { teams: best, benched, imbalance: bestGap };
+  return best;
 }
-export function lineupSignature(result: BuildResult) {
-  return result.teams
-    .map((t) =>
-      t.members
-        .map((p) => p.id)
+function signatureFor(teams: BuiltTeam[]) {
+  return teams
+    .map((team) =>
+      team.members
+        .map((player) => player.id)
         .sort()
         .join("-"),
     )
     .sort();
+}
+export function lineupSignature(result: BuildResult) {
+  return signatureFor(result.teams);
 }

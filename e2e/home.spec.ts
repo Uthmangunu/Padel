@@ -48,7 +48,9 @@ test("runs a persistent race-to-three session and exposes stats", async ({
     }
   });
   await page.reload();
-  await expect(page.getByText(/LIVE|AWAITING CONFIRMATION/i)).toBeVisible();
+  await expect(
+    page.getByText(/LIVE|AWAITING CONFIRMATION/i).first(),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Confirm result" }),
   ).toBeVisible();

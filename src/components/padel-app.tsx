@@ -25,7 +25,21 @@ type Match = {
   score?: Score;
   homeTeam: { name: string };
   awayTeam: { name: string };
-  session: { gameRule: string; inputMode: string; scoringPreset: string };
+  session: {
+    gameRule: string;
+    inputMode: string;
+    scoringPreset: string;
+    format?: string;
+    progression?: { queue?: string[] };
+    matches?: Array<{
+      id: string;
+      round: number;
+      group?: string | null;
+      status: string;
+      homeTeam: { name: string };
+      awayTeam: { name: string };
+    }>;
+  };
 };
 type Format = "WINNER_STAYS" | "KNOCKOUT" | "ROUND_ROBIN" | "GROUPS_KNOCKOUT";
 const call = async <T,>(url: string, init?: RequestInit) => {
@@ -795,6 +809,36 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   </button>
                 )}
               </div>
+              {match.session.matches && (
+                <section className="mt-5 rounded-xl bg-[#f4f0e7] p-3 text-sm">
+                  <b>{match.session.format?.replaceAll("_", " ")} progress</b>
+                  {match.session.progression?.queue && (
+                    <p>
+                      Winner Stays queue:{" "}
+                      {match.session.progression.queue.join(" → ") ||
+                        "court rotation complete"}
+                    </p>
+                  )}
+                  <ul className="mt-2 space-y-1">
+                    {match.session.matches.map((item) => (
+                      <li key={item.id}>
+                        R{item.round}
+                        {item.group ? ` · Group ${item.group}` : ""}:{" "}
+                        {item.homeTeam.name} vs {item.awayTeam.name}{" "}
+                        <span className="pill">
+                          {item.status.replaceAll("_", " ")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {match.session.format === "ROUND_ROBIN" && (
+                    <p className="mb-0">
+                      Round-robin standings update after every confirmed result;
+                      use Stats for player form.
+                    </p>
+                  )}
+                </section>
+              )}
             </div>
           )}
         </section>

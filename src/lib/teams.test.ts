@@ -32,4 +32,21 @@ describe("team builder", () => {
     const second = buildBalancedTeams(p, [], [lineupSignature(first)]);
     expect(lineupSignature(second)).not.toEqual(lineupSignature(first));
   });
+  it("benches a feasible player instead of breaking a forced lowest-rated pair", () => {
+    const roster = [...p.slice(0, 4), { id: "low", name: "low", rating: 1 }];
+    const result = buildBalancedTeams(roster, [
+      { type: "FORCE", playerA: "low", playerB: "0" },
+    ]);
+    expect(result.benched[0].id).not.toBe("low");
+  });
+  it("generates the default sixteen-player scale within a practical bound", () => {
+    const roster = Array.from({ length: 16 }, (_, index) => ({
+      id: String(index),
+      name: String(index),
+      rating: 10 - index / 2,
+    }));
+    const start = performance.now();
+    expect(buildBalancedTeams(roster).teams).toHaveLength(8);
+    expect(performance.now() - start).toBeLessThan(500);
+  });
 });

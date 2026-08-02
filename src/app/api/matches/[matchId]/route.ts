@@ -12,7 +12,14 @@ export async function GET(
         homeTeam: { include: { members: { include: { participant: true } } } },
         awayTeam: { include: { members: { include: { participant: true } } } },
         events: { orderBy: { sequence: "asc" } },
-        session: true,
+        session: {
+          include: {
+            matches: {
+              orderBy: { sequence: "asc" },
+              include: { homeTeam: true, awayTeam: true },
+            },
+          },
+        },
         result: true,
       },
     });

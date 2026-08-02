@@ -4,7 +4,11 @@ export type GameRule = "ADVANTAGE" | "GOLDEN_POINT";
 export type ScoreEventType =
   "POINT" | "TEAM_GAME" | "TIEBREAK_GAME" | "TIEBREAK_WINNER" | "UNDO";
 export type ScoreEvent = { type: ScoreEventType; winner?: TeamIndex };
-export type SetScore = { games: [number, number]; tiebreak?: [number, number] };
+export type SetScore = {
+  games: [number, number];
+  tiebreak?: [number, number];
+  tiebreakWinner?: TeamIndex;
+};
 export type MatchScore = {
   points: [number, number];
   games: [number, number];
@@ -35,13 +39,18 @@ const clutchPoint = (points: [number, number], rule: GameRule) =>
   rule === "GOLDEN_POINT"
     ? points[0] === 3 && points[1] === 3
     : points[0] >= 3 && points[1] >= 3;
-function completeSet(score: MatchScore, winner: TeamIndex) {
+function completeSet(
+  score: MatchScore,
+  winner: TeamIndex,
+  tiebreakWinner?: TeamIndex,
+) {
   score.sets[winner] += 1;
   score.setScores.push({
     games: [...score.games] as [number, number],
-    ...(score.tiebreak
+    ...(score.tiebreak && tiebreakWinner === undefined
       ? { tiebreak: [...score.tiebreak] as [number, number] }
       : {}),
+    ...(tiebreakWinner === undefined ? {} : { tiebreakWinner }),
   });
   score.games = [0, 0];
   score.points = [0, 0];
@@ -75,8 +84,13 @@ function applyEvent(
   }
   if (event.type === "TIEBREAK_GAME" || event.type === "TIEBREAK_WINNER") {
     if (!isTiebreak(score)) return score;
-    if (event.type === "TIEBREAK_WINNER") score.tiebreak![event.winner] = 7;
-    else score.tiebreak![event.winner] += 1;
+    if (event.type === "TIEBREAK_WINNER") {
+      score.games[event.winner] += 1;
+      score.totalGames[event.winner] += 1;
+      completeSet(score, event.winner, event.winner);
+      return score;
+    }
+    score.tiebreak![event.winner] += 1;
     const loser = other(event.winner);
     if (
       score.tiebreak![event.winner] >= 7 &&

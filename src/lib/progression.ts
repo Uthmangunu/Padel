@@ -32,13 +32,18 @@ export function groupStandings(
     away.games += match.awayGames;
     table.get(match.winnerTeamId)!.wins += 1;
   }
-  return [...table.values()].sort(
-    (a, b) =>
-      b.wins - a.wins ||
-      b.diff - a.diff ||
-      b.games - a.games ||
-      seeds.get(a.id)! - seeds.get(b.id)!,
-  );
+  return [...table.values()].sort((a, b) => {
+    const basic = b.wins - a.wins || b.diff - a.diff || b.games - a.games;
+    if (basic) return basic;
+    const direct = matches.find(
+      (match) =>
+        (match.homeTeamId === a.id && match.awayTeamId === b.id) ||
+        (match.homeTeamId === b.id && match.awayTeamId === a.id),
+    );
+    if (direct?.winnerTeamId === a.id) return -1;
+    if (direct?.winnerTeamId === b.id) return 1;
+    return seeds.get(a.id)! - seeds.get(b.id)!;
+  });
 }
 
 /** Keeps the one-court invariant in the same transaction as confirmation. */
@@ -144,6 +149,10 @@ export async function advanceSession(tx: Tx, sessionId: string) {
     }
   }
   if (session.format === "GROUPS_KNOCKOUT") {
+    if (confirmed.some((match) => match.round === 3)) {
+      await complete(tx, sessionId);
+      return;
+    }
     const groupRounds = confirmed.filter((match) => match.round === 1);
     if (groupRounds.length && confirmed.length === groupRounds.length) {
       const seeds = new Map(session.teams.map((team) => [team.id, team.seed]));
