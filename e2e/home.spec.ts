@@ -1,13 +1,22 @@
 import { expect, test } from "@playwright/test";
 
-test("smoke: shows the mobile-first roster experience", async ({ page }) => {
+test("introduces the app before opening the roster", async ({ page }) => {
   await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Your whole club night, in one place." }),
+  ).toBeVisible();
+  for (let step = 0; step < 3; step += 1)
+    await page.getByRole("button", { name: "Show me" }).click();
+  await page.getByRole("button", { name: "Let's play" }).click();
   await expect(page.getByText("Your court, organised.")).toBeVisible();
 });
 
 test("runs a persistent race-to-three session and exposes stats", async ({
   page,
 }) => {
+  await page.addInitScript(() =>
+    window.localStorage.setItem("padel-onboarding-v1", "done"),
+  );
   await page.goto("/");
   for (const name of ["Youssef", "Saif", "Uthman", "Todimu"]) {
     await page.getByRole("checkbox", { name, exact: true }).check();
@@ -70,6 +79,14 @@ test("runs a persistent race-to-three session and exposes stats", async ({
     .click();
   await expect(
     page.getByRole("button", { name: "Share session" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "history", exact: true }).click();
+  await expect(page.getByText("Past games", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Friday Padel session history" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Open session" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "stats", exact: true }).click();
   await expect(page.getByText("Player statistics")).toBeVisible();

@@ -2,8 +2,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
+  ArrowLeft,
+  ArrowRight,
   BarChart3,
+  CalendarDays,
   CircleGauge,
+  History,
+  Info,
   ListPlus,
   Pencil,
   ShieldAlert,
@@ -63,6 +68,29 @@ type Match = {
   };
 };
 type Format = "WINNER_STAYS" | "KNOCKOUT" | "ROUND_ROBIN" | "GROUPS_KNOCKOUT";
+type SavedSession = {
+  id: string;
+  name: string;
+  status: "SETUP" | "ACTIVE" | "COMPLETE";
+  format: Format;
+  inputMode: "POINTS" | "GAMES";
+  scoringPreset: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  teams: Array<{ id: string; name: string; seed: number }>;
+  matches: Array<{
+    id: string;
+    sequence: number;
+    round: number;
+    status: string;
+    homeTeamId: string;
+    awayTeamId: string;
+    winnerTeamId: string | null;
+    homeGames: number;
+    awayGames: number;
+  }>;
+};
 const call = async <T,>(url: string, init?: RequestInit) => {
   const response = await fetch(url, {
     headers: { "content-type": "application/json" },
@@ -85,9 +113,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   const [listId, setListId] = useState(initialLists[0]?.id ?? "");
   const [players, setPlayers] = useState<Player[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [tab, setTab] = useState<"roster" | "teams" | "score" | "stats">(
-    "roster",
-  );
+  const [tab, setTab] = useState<
+    "roster" | "teams" | "score" | "history" | "stats"
+  >("roster");
   const [teams, setTeams] = useState<ReturnType<
     typeof buildBalancedTeams
   > | null>(null);
@@ -105,14 +133,13 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   );
   const [inputMode, setInputMode] = useState<"POINTS" | "GAMES">("POINTS");
   const [match, setMatch] = useState<Match | null>(null);
-  const [recentSessions, setRecentSessions] = useState<
-    Array<{
-      id: string;
-      name: string;
-      status: string;
-      matches: Array<{ id: string; sequence: number }>;
-    }>
-  >([]);
+  const [recentSessions, setRecentSessions] = useState<SavedSession[]>([]);
+  const [historyFilter, setHistoryFilter] = useState<
+    "ALL" | "ACTIVE" | "COMPLETE"
+  >("ALL");
+  const [expandedSession, setExpandedSession] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
   const [stats, setStats] = useState<{
     coverage: { pointModeMatches: number; totalMatches: number };
     players: Array<{
@@ -140,7 +167,19 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
     () => lists.find((list) => list.id === listId),
     [listId, lists],
   );
+  const visibleSessions = useMemo(
+    () =>
+      recentSessions.filter(
+        (session) =>
+          historyFilter === "ALL" || session.status === historyFilter,
+      ),
+    [historyFilter, recentSessions],
+  );
   const roster = players.filter((player) => selected.includes(player.id));
+  useEffect(() => {
+    if (window.localStorage.getItem("padel-onboarding-v1") !== "done")
+      setShowOnboarding(true);
+  }, []);
   const loadPlayers = () => {
     if (listId)
       void call<Player[]>(`/api/lists/${listId}/players`)
@@ -181,14 +220,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         if (live) void openMatch(live.id);
       })
       .catch(() => undefined);
-    void call<
-      Array<{
-        id: string;
-        name: string;
-        status: string;
-        matches: Array<{ id: string; sequence: number }>;
-      }>
-    >(`/api/sessions?listId=${listId}`)
+    void call<SavedSession[]>(`/api/sessions?listId=${listId}`)
       .then(setRecentSessions)
       .catch(() => undefined);
   }, [listId]);
@@ -312,6 +344,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         "Session started. Team snapshots and live score are now persisted.",
       );
       if (session.matches[0]) await openMatch(session.matches[0].id);
+      void call<SavedSession[]>(`/api/sessions?listId=${listId}`).then(
+        setRecentSessions,
+      );
     } catch (error) {
       setNotice((error as Error).message);
     }
@@ -355,14 +390,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             "Session complete — final standings and sharing remain available.",
           );
         }
-        void call<
-          Array<{
-            id: string;
-            name: string;
-            status: string;
-            matches: Array<{ id: string; sequence: number }>;
-          }>
-        >(`/api/sessions?listId=${listId}`).then(setRecentSessions);
+        void call<SavedSession[]>(`/api/sessions?listId=${listId}`).then(
+          setRecentSessions,
+        );
       }
     } catch (error) {
       setNotice((error as Error).message);
@@ -423,9 +453,123 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       window.open(whatsappUrl(text), "_blank", "noopener");
     }
   };
+  const finishOnboarding = () => {
+    window.localStorage.setItem("padel-onboarding-v1", "done");
+    setShowOnboarding(false);
+    setOnboardingStep(0);
+  };
+  const shareSavedSession = async (session: SavedSession) => {
+    const teamNames = new Map(
+      session.teams.map((team) => [team.id, team.name]),
+    );
+    const text = formatSessionShare({
+      session: session.name,
+      format: session.format.replaceAll("_", " "),
+      fixtures: session.matches
+        .filter((item) => item.status === "CONFIRMED")
+        .map((item) => ({
+          home: teamNames.get(item.homeTeamId) ?? "Home",
+          away: teamNames.get(item.awayTeamId) ?? "Away",
+          score: `${item.homeGames}–${item.awayGames}`,
+          winner: item.winnerTeamId
+            ? teamNames.get(item.winnerTeamId)
+            : undefined,
+        })),
+    });
+    if (navigator.share) await navigator.share({ title: session.name, text });
+    else {
+      await navigator.clipboard.writeText(text);
+      window.open(whatsappUrl(text), "_blank", "noopener");
+      setNotice("Session recap copied and ready to share.");
+    }
+  };
   const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  const onboardingSlides = [
+    {
+      icon: UsersRound,
+      kicker: "WELCOME TO PADEL PARTY",
+      title: "Your whole club night, in one place.",
+      copy: "Keep an open-ended roster, choose who's playing tonight and leave the spreadsheet at home.",
+    },
+    {
+      icon: Shuffle,
+      kicker: "BALANCE THE CHAOS",
+      title: "Fair teams without the politics.",
+      copy: "Ratings, forced pairs, blocked pairs and genuine reshuffles help you build matchups everyone can argue about equally.",
+    },
+    {
+      icon: Trophy,
+      kicker: "RUN THE COURT",
+      title: "Score live. Undo mistakes. Keep moving.",
+      copy: "Every tap is saved, refresh-safe and undoable until you confirm the result. The next fixture is handled for you.",
+    },
+    {
+      icon: History,
+      kicker: "KEEP THE RECEIPTS",
+      title: "Every session becomes club history.",
+      copy: "Come back to past fixtures, scores and formats whenever you want—then share the recap with the group chat.",
+    },
+  ];
+  const onboarding = onboardingSlides[onboardingStep];
+  const OnboardingIcon = onboarding.icon;
   return (
     <main className="shell">
+      {showOnboarding && (
+        <div className="onboarding-backdrop">
+          <section
+            className="onboarding-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="onboarding-title"
+          >
+            <button className="skip-intro" onClick={finishOnboarding}>
+              Skip intro
+            </button>
+            <div className="onboarding-art" data-step={onboardingStep}>
+              <OnboardingIcon size={52} strokeWidth={2.4} />
+              <span>{String(onboardingStep + 1).padStart(2, "0")}</span>
+            </div>
+            <div className="onboarding-copy">
+              <span className="kicker">{onboarding.kicker}</span>
+              <h2 id="onboarding-title">{onboarding.title}</h2>
+              <p>{onboarding.copy}</p>
+            </div>
+            <div className="onboarding-dots" aria-label="Onboarding progress">
+              {onboardingSlides.map((slide, index) => (
+                <span
+                  key={slide.kicker}
+                  data-active={index === onboardingStep}
+                />
+              ))}
+            </div>
+            <div className="onboarding-actions">
+              {onboardingStep > 0 ? (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setOnboardingStep((step) => step - 1)}
+                >
+                  <ArrowLeft size={18} /> Back
+                </button>
+              ) : (
+                <span />
+              )}
+              <button
+                className="btn btn-coral"
+                onClick={() =>
+                  onboardingStep === onboardingSlides.length - 1
+                    ? finishOnboarding()
+                    : setOnboardingStep((step) => step + 1)
+                }
+              >
+                {onboardingStep === onboardingSlides.length - 1
+                  ? "Let's play"
+                  : "Show me"}
+                <ArrowRight size={18} />
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       <div className="topbar">
         <div className="brand-lockup">
           <span className="brand-ball">P</span>
@@ -435,6 +579,15 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           </span>
         </div>
         <div className="list-tools">
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              setOnboardingStep(0);
+              setShowOnboarding(true);
+            }}
+          >
+            <Info size={18} /> How it works
+          </button>
           <select
             className="field list-picker"
             aria-label="Active list"
@@ -510,6 +663,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             ["roster", UsersRound, "The crew"],
             ["teams", Shuffle, "Team chaos"],
             ["score", Trophy, "Score it"],
+            ["history", History, "History"],
             ["stats", BarChart3, "Receipts"],
           ] as const
         ).map(([item, Icon, label]) => (
@@ -1059,6 +1213,149 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   )}
                 </section>
               )}
+            </div>
+          )}
+        </section>
+      )}
+      {tab === "history" && (
+        <section className="card history-section">
+          <div className="section-heading">
+            <div>
+              <span className="kicker">SAVED TO THE CLUBHOUSE</span>
+              <h2>Past games</h2>
+              <p>
+                Every started session is saved automatically. Reopen the score,
+                inspect every fixture or send the recap back to the group chat.
+              </p>
+            </div>
+            <div className="history-filters" aria-label="Filter sessions">
+              {(["ALL", "ACTIVE", "COMPLETE"] as const).map((status) => (
+                <button
+                  key={status}
+                  data-active={historyFilter === status}
+                  onClick={() => setHistoryFilter(status)}
+                >
+                  {status === "ALL" ? "All" : status.toLowerCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+          {visibleSessions.length === 0 ? (
+            <div className="history-empty">
+              <CalendarDays size={42} />
+              <h3>No sessions saved yet.</h3>
+              <p>Your first confirmed rivalry will live here forever.</p>
+              <button className="btn" onClick={() => setTab("roster")}>
+                Pick the crew <ArrowRight size={18} />
+              </button>
+            </div>
+          ) : (
+            <div className="history-list">
+              {visibleSessions.map((session) => {
+                const teamNames = new Map(
+                  session.teams.map((team) => [team.id, team.name]),
+                );
+                const sortedMatches = [...session.matches].sort(
+                  (a, b) => a.sequence - b.sequence,
+                );
+                const latestMatch = sortedMatches.at(-1);
+                const confirmed = session.matches.filter(
+                  (item) => item.status === "CONFIRMED",
+                ).length;
+                const expanded = expandedSession === session.id;
+                return (
+                  <article className="history-card" key={session.id}>
+                    <button
+                      className="history-summary"
+                      aria-label={`${session.name} history`}
+                      aria-expanded={expanded}
+                      onClick={() =>
+                        setExpandedSession(expanded ? null : session.id)
+                      }
+                    >
+                      <span className="history-date">
+                        <CalendarDays size={19} />
+                        {new Intl.DateTimeFormat(undefined, {
+                          dateStyle: "medium",
+                        }).format(
+                          new Date(session.startedAt ?? session.createdAt),
+                        )}
+                      </span>
+                      <span className="history-title">
+                        <b>{session.name}</b>
+                        <small>
+                          {session.format.replaceAll("_", " ")} · {confirmed}/
+                          {session.matches.length} results confirmed
+                        </small>
+                      </span>
+                      <span
+                        className="history-status"
+                        data-status={session.status}
+                      >
+                        {session.status.toLowerCase()}
+                      </span>
+                      <ArrowRight
+                        className="history-chevron"
+                        data-open={expanded}
+                        size={20}
+                      />
+                    </button>
+                    {expanded && (
+                      <div className="history-details">
+                        <div className="history-meta">
+                          <span>{session.teams.length} teams</span>
+                          <span>{session.inputMode.toLowerCase()} input</span>
+                          <span>
+                            {session.scoringPreset.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        <div className="fixture-list">
+                          {sortedMatches.map((fixture) => (
+                            <div className="fixture-row" key={fixture.id}>
+                              <span>R{fixture.round}</span>
+                              <b>
+                                {teamNames.get(fixture.homeTeamId) ?? "TBD"}
+                              </b>
+                              <strong>
+                                {fixture.status === "CONFIRMED"
+                                  ? `${fixture.homeGames}–${fixture.awayGames}`
+                                  : "vs"}
+                              </strong>
+                              <b>
+                                {teamNames.get(fixture.awayTeamId) ?? "TBD"}
+                              </b>
+                              <span className="pill">
+                                {fixture.status
+                                  .toLowerCase()
+                                  .replaceAll("_", " ")}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="history-actions">
+                          {latestMatch && (
+                            <button
+                              className="btn"
+                              onClick={() => openMatch(latestMatch.id)}
+                            >
+                              {session.status === "ACTIVE"
+                                ? "Resume session"
+                                : "Open session"}
+                              <ArrowRight size={18} />
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => shareSavedSession(session)}
+                          >
+                            Share recap
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>
