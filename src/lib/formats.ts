@@ -1,0 +1,6 @@
+export type FormatTeam = { id: string; seed: number };
+export type Fixture = { homeId: string; awayId: string; round: number; sequence: number; bye?: boolean };
+export function roundRobin(teams: FormatTeam[]): Fixture[] { const out: Fixture[]=[]; let n=0; for(let i=0;i<teams.length;i++)for(let j=i+1;j<teams.length;j++)out.push({homeId:teams[i].id,awayId:teams[j].id,round:i+1,sequence:n++}); return out; }
+export function knockout(teams: FormatTeam[]): Fixture[] { const sorted=[...teams].sort((a,b)=>a.seed-b.seed); const size=2**Math.ceil(Math.log2(Math.max(2,sorted.length))); const out:Fixture[]=[]; for(let i=0;i<size/2;i++){const home=sorted[i];const away=sorted[size-1-i]; if(home&&away)out.push({homeId:home.id,awayId:away.id,round:1,sequence:i});} return out; }
+export function groups(teams: FormatTeam[]) { if(teams.length<4)throw new Error("Groups + Knockout needs at least four teams"); const a:FormatTeam[]=[],b:FormatTeam[]=[]; [...teams].sort((x,y)=>x.seed-y.seed).forEach((team,i)=>(Math.floor(i/2)%2===0?(i%2===0?a:b):(i%2===0?b:a)).push(team)); return {a,b}; }
+export function winnerStaysNext(queue: string[], winnerId: string, loserId: string) { const next=queue.filter(id=>id!==winnerId&&id!==loserId); return [...next,loserId]; }
