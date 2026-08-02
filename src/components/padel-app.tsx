@@ -1,6 +1,20 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Archive,
+  BarChart3,
+  CircleGauge,
+  ListPlus,
+  Pencil,
+  ShieldAlert,
+  Shuffle,
+  Sparkles,
+  Trophy,
+  UserPlus,
+  UsersRound,
+  Zap,
+} from "lucide-react";
+import {
   buildBalancedTeams,
   lineupSignature,
   type Constraint,
@@ -412,16 +426,17 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
   return (
     <main className="shell">
-      <header className="flex flex-wrap items-center justify-between gap-3 py-4">
-        <div>
-          <p className="text-pine mb-1 text-sm font-bold tracking-[.18em]">
-            PADEL MANAGER
-          </p>
-          <h1 className="m-0 text-3xl font-black">Your court, organised.</h1>
+      <div className="topbar">
+        <div className="brand-lockup">
+          <span className="brand-ball">P</span>
+          <span>
+            <b>PADEL PARTY</b>
+            <small>Match night, minus the admin drama.</small>
+          </span>
         </div>
-        <div className="flex gap-2">
+        <div className="list-tools">
           <select
-            className="field w-auto"
+            className="field list-picker"
             aria-label="Active list"
             value={listId}
             onChange={(event) => {
@@ -436,33 +451,78 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
               </option>
             ))}
           </select>
-          <button className="btn btn-secondary" onClick={renameList}>
-            Rename
+          <button
+            className="icon-btn"
+            aria-label="Rename list"
+            title="Rename list"
+            onClick={renameList}
+          >
+            <Pencil size={18} />
           </button>
-          <button className="btn btn-secondary" onClick={archiveList}>
-            Archive
+          <button
+            className="icon-btn"
+            aria-label="Archive list"
+            title="Archive list"
+            onClick={archiveList}
+          >
+            <Archive size={18} />
           </button>
-          <button className="btn btn-secondary" onClick={addList}>
-            New list
+          <button className="btn btn-coral" onClick={addList}>
+            <ListPlus size={18} /> New list
           </button>
         </div>
+      </div>
+      <header className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">
+            <Sparkles size={16} /> THE GROUP CHAT&apos;S NEW CAPTAIN
+          </p>
+          <h1>Your court, organised.</h1>
+          <p className="hero-lede">
+            Pick the crew, split the talent, settle the score. No spreadsheets.
+            No suspiciously convenient team selections.
+          </p>
+          <div className="hero-chips">
+            <span>
+              <UsersRound size={17} /> {players.length || 16} players
+            </span>
+            <span>
+              <Zap size={17} /> {selected.length} ready to cook
+            </span>
+          </div>
+        </div>
+        <span className="hero-sticker">
+          NO BORING
+          <br />
+          TEAMS
+        </span>
       </header>
-      <p className="rounded-xl border border-[#e8d7a2] bg-[#fff8db] p-3 text-sm">
-        Open shared app: anyone with this link can edit the roster and results.
-        Add an admin-key guard before using it for sensitive records.
+      <p className="public-note">
+        <ShieldAlert size={19} />
+        <span>
+          <b>Open court.</b> Anyone with this link can edit the roster and
+          results. Keep sensitive records off it.
+        </span>
       </p>
-      <nav className="mt-4 mb-6 flex gap-6 border-b">
-        {(["roster", "teams", "score", "stats"] as const).map((item) => (
+      <nav className="app-nav">
+        {(
+          [
+            ["roster", UsersRound, "The crew"],
+            ["teams", Shuffle, "Team chaos"],
+            ["score", Trophy, "Score it"],
+            ["stats", BarChart3, "Receipts"],
+          ] as const
+        ).map(([item, Icon, label]) => (
           <button
             key={item}
-            className="tab capitalize"
+            className="tab"
             data-active={tab === item}
             onClick={() => {
               setTab(item);
               if (item === "stats") loadStats();
             }}
           >
-            {item}
+            <Icon size={19} /> <span>{label}</span>
           </button>
         ))}
       </nav>
@@ -472,19 +532,21 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         </p>
       )}
       {tab === "roster" && (
-        <section className="card">
-          <div className="mb-4 flex justify-between">
+        <section className="card roster-section">
+          <div className="section-heading">
             <div>
-              <h2 className="m-0 text-xl">Roster</h2>
-              <p className="mb-0 text-sm text-[#557065]">
-                Select players for the next session.
+              <span className="kicker">STEP 01 · CHOOSE YOUR FIGHTERS</span>
+              <h2>Who&apos;s causing trouble tonight?</h2>
+              <p>
+                Tap everyone who&apos;s actually turning up. Bold of us to trust
+                the group chat.
               </p>
             </div>
             <button className="btn" onClick={addPlayer}>
-              Add player
+              <UserPlus size={18} /> Add player
             </button>
           </div>
-          <div className="grid-2 mb-4 grid">
+          <div className="date-filters grid-2 grid">
             <label>
               From
               <input
@@ -504,13 +566,25 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
               />
             </label>
           </div>
-          <div className="grid-2 grid">
-            {players.map((player) => (
+          {selected.length > 0 && (
+            <div className="selection-strip">
+              <span>
+                <b>{selected.length} picked.</b> Enough talent? We&apos;ll see.
+              </span>
+              <button className="btn btn-lime" onClick={() => setTab("teams")}>
+                Make the teams <Shuffle size={17} />
+              </button>
+            </div>
+          )}
+          <div className="player-grid">
+            {players.map((player, index) => (
               <div
                 key={player.id}
-                className="flex items-center justify-between rounded-xl border border-[#e1e8df] p-3"
+                className="player-card"
+                data-selected={selected.includes(player.id)}
+                data-tone={index % 6}
               >
-                <label className="flex cursor-pointer items-center gap-3">
+                <label className="player-main">
                   <input
                     type="checkbox"
                     checked={selected.includes(player.id)}
@@ -522,15 +596,29 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                       )
                     }
                   />
-                  <b>{player.name}</b>
+                  <span className="avatar" aria-hidden="true">
+                    {player.name.slice(0, 1)}
+                  </span>
+                  <span className="player-name">
+                    <b>{player.name}</b>
+                    <small>
+                      {player.rating >= 8
+                        ? "Court menace"
+                        : player.rating >= 6
+                          ? "Solid operator"
+                          : "Wildcard energy"}
+                    </small>
+                  </span>
                 </label>
-                <span className="flex items-center gap-2">
-                  <span className="pill">{player.rating.toFixed(1)}</span>
+                <span className="player-actions">
+                  <span className="rating">
+                    <CircleGauge size={15} /> {player.rating.toFixed(1)}
+                  </span>
                   <button
                     aria-label={`Edit ${player.name}`}
                     onClick={() => editPlayer(player)}
                   >
-                    Edit
+                    <Pencil size={16} />
                   </button>
                   <button
                     aria-label={`Archive ${player.name}`}
@@ -545,9 +633,14 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         </section>
       )}
       {tab === "teams" && (
-        <section className="grid-2 grid">
-          <div className="card">
-            <h2 className="mt-0">Build the court</h2>
+        <section className="arena-layout grid-2 grid">
+          <div className="card team-builder">
+            <span className="kicker">STEP 02 · LET THE MATH COOK</span>
+            <h2 className="mt-1">Build the court</h2>
+            <p className="section-copy">
+              Fair teams, spicy matchups, absolutely no picking your best mate
+              just because he drove.
+            </p>
             <div className="grid-2 grid">
               <label>
                 Format
@@ -605,13 +698,13 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <button className="btn" onClick={() => generate()}>
-                Auto-balance
+                <Zap size={18} /> Auto-balance
               </button>
               <button
                 className="btn btn-secondary"
                 onClick={() => generate(true)}
               >
-                Genuine reshuffle
+                <Shuffle size={18} /> Genuine reshuffle
               </button>
               <button
                 className="btn btn-secondary"
@@ -678,18 +771,22 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             )}
             {teams && (
               <>
-                <p className="text-sm">
-                  Rating spread: <b>{teams.imbalance.toFixed(1)}</b>. Edit a
-                  team by selecting two player IDs below.
+                <p className="balance-readout">
+                  <Sparkles size={17} /> Rating spread:{" "}
+                  <b>{teams.imbalance.toFixed(1)}</b>. The algorithm has spoken.
                 </p>
-                <div className="grid">
+                <div className="team-stack grid">
                   {teams.teams.map((team, index) => (
-                    <div key={index} className="bg-mint rounded-xl p-3">
-                      <b>Team {index + 1}</b>
-                      <span className="pill float-right">
+                    <div
+                      key={index}
+                      className="team-card"
+                      data-team-tone={index % 4}
+                    >
+                      <span className="team-number">TEAM {index + 1}</span>
+                      <span className="rating float-right">
                         {team.total.toFixed(1)}
                       </span>
-                      <p>
+                      <p className="team-names">
                         {team.members.map((member) => member.name).join(" + ")}
                       </p>
                       <select
@@ -739,27 +836,37 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                     {teams.benched.map((player) => player.name).join(", ")}
                   </p>
                 )}
-                <button className="btn mt-4" onClick={createSession}>
-                  Start session
+                <button className="btn btn-coral mt-4" onClick={createSession}>
+                  <Trophy size={18} /> Start session
                 </button>
               </>
             )}
           </div>
-          <aside className="card">
-            <h2 className="mt-0">Fixed after kickoff</h2>
-            <p className="text-sm text-[#557065]">
+          <aside className="card house-rules">
+            <span className="house-emoji">🏓</span>
+            <span className="kicker">HOUSE RULES</span>
+            <h2>Once the ball&apos;s live, no funny business.</h2>
+            <p>
               Teams, participant snapshots and scoring configuration freeze when
               a session starts. An odd player is explicitly benched.
             </p>
+            <div className="sassy-note">
+              “But I wanted Saif!” — denied by the algorithm.
+            </div>
           </aside>
         </section>
       )}
       {tab === "score" && (
         <section>
           {!match ? (
-            <div className="card">
-              <h2 className="mt-0">No live match</h2>
-              <p>Start or resume a session from Teams.</p>
+            <div className="card empty-court">
+              <span className="empty-ball">●</span>
+              <span className="kicker">THE COURT IS SUSPICIOUSLY QUIET</span>
+              <h2>No live match</h2>
+              <p>
+                Build the teams, start the session, then let the arguments
+                begin.
+              </p>
               {recentSessions.length > 0 && (
                 <div className="mt-4">
                   <b>Recent sessions</b>
@@ -785,15 +892,15 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
               )}
             </div>
           ) : (
-            <div className="card mx-auto max-w-3xl">
-              <div className="flex justify-between">
+            <div className="card scoreboard mx-auto max-w-3xl">
+              <div className="score-topline flex justify-between">
                 <span className="pill">
                   {match.status.replaceAll("_", " ")}
                 </span>
                 <b aria-label="Match clock">{clock}</b>
               </div>
-              <div className="grid-2 my-7 grid text-center">
-                <div>
+              <div className="score-teams grid-2 my-7 grid text-center">
+                <div className="score-side score-home">
                   <h2>{match.homeTeam.name}</h2>
                   <strong className="text-6xl">
                     {match.score?.games[0] ?? 0}
@@ -808,7 +915,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                     {match.score?.tiebreak ? "tiebreak" : "points"}
                   </p>
                 </div>
-                <div>
+                <div className="score-side score-away">
                   <h2>{match.awayTeam.name}</h2>
                   <strong className="text-6xl">
                     {match.score?.games[1] ?? 0}
@@ -824,7 +931,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   </p>
                 </div>
               </div>
-              <div className="grid-2 grid">
+              <div className="score-actions grid-2 grid">
                 <button
                   className="btn min-h-20"
                   onClick={() =>
@@ -955,32 +1062,31 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         </section>
       )}
       {tab === "stats" && (
-        <section className="card">
-          <div className="mb-4 flex justify-between">
+        <section className="card stats-section">
+          <div className="section-heading">
             <div>
-              <h2 className="m-0">Player statistics</h2>
-              <p className="mb-0 text-sm text-[#557065]">
-                Clutch samples are limited to point-tapped matches.
+              <span className="kicker">THE RECEIPTS NEVER LIE</span>
+              <h2>Player statistics</h2>
+              <p>
+                Form, streaks and partner chemistry. Group-chat excuses sold
+                separately.
               </p>
             </div>
             <button className="btn btn-secondary" onClick={loadStats}>
-              Refresh
+              <BarChart3 size={18} /> Refresh
             </button>
           </div>
           {!stats ? (
             <p>Load the dashboard to see confirmed history.</p>
           ) : (
             <>
-              <p className="bg-mint rounded-xl p-3 text-sm">
+              <p className="coverage-card">
                 <b>Clutch coverage:</b> {stats.coverage.pointModeMatches}{" "}
                 point-mode matches out of {stats.coverage.totalMatches} total.
               </p>
               <div className="grid-3 grid">
                 {stats.players.map((player) => (
-                  <article
-                    key={player.id}
-                    className="rounded-xl border border-[#e1e8df] p-4"
-                  >
+                  <article key={player.id} className="stat-card">
                     <h3 className="mt-0">{player.name}</h3>
                     <p className="text-2xl font-black">
                       {player.wins}–{player.losses}
