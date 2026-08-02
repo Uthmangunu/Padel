@@ -37,6 +37,7 @@ enum ScoreEventType {
   POINT
   TEAM_GAME
   TIEBREAK_GAME
+  TIEBREAK_WINNER
   UNDO
 }
 
@@ -107,7 +108,7 @@ model TeamMember {
   teamId String
   participantId String
   team Team @relation(fields:[teamId], references:[id], onDelete: Cascade)
-  participant Participant @relation(fields:[participantId], references:[id])
+  participant Participant @relation(fields:[participantId], references:[id], onDelete: Cascade)
   @@id([teamId, participantId])
 }
 model Match {
@@ -117,6 +118,7 @@ model Match {
   awayTeamId String
   round Int @default(1)
   sequence Int
+  group String?
   status MatchStatus @default(PENDING)
   revision Int @default(0)
   startedAt DateTime?
@@ -134,6 +136,7 @@ model Match {
   events ScoreEvent[]
   result MatchResult?
   @@index([sessionId, status])
+  @@unique([sessionId, sequence])
 }
 model ScoreEvent {
   id String @id @default(cuid())

@@ -4,10 +4,19 @@ import { sessionSchema } from "@/lib/validation";
 import { buildBalancedTeams } from "@/lib/teams";
 import { knockout, roundRobin, groups } from "@/lib/formats";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const url = new URL(req.url);
+    const listId = url.searchParams.get("listId");
+    const status = url.searchParams.get("status");
     return Response.json(
       await prisma.session.findMany({
+        where: {
+          ...(listId ? { listId } : {}),
+          ...(status
+            ? { status: status as "SETUP" | "ACTIVE" | "COMPLETE" }
+            : {}),
+        },
         include: {
           list: true,
           teams: {
@@ -44,14 +53,32 @@ export async function POST(req: Request) {
     const built = input.teams
       ? (() => {
           const ids = input.teams.flat();
+          const benched = input.benchedIds ?? [];
           if (
-            new Set(ids).size !== ids.length ||
-            ids.some((id) => !candidateMap.has(id))
+            new Set([...ids, ...benched]).size !==
+              ids.length + benched.length ||
+            ids.some((id) => !candidateMap.has(id)) ||
+            benched.some((id) => !candidateMap.has(id)) ||
+            [...candidateMap.keys()].some(
+              (id) => !ids.includes(id) && !benched.includes(id),
+            )
           )
             throw new AppError(
               400,
-              "Teams must contain selected players exactly once",
+              "Every selected player must appear once in a team or the explicit bench",
             );
+          for (const constraint of input.constraints ?? []) {
+            const together = input.teams.some(
+              (pair) =>
+                pair.includes(constraint.playerA) &&
+                pair.includes(constraint.playerB),
+            );
+            if (
+              (constraint.type === "FORCE" && !together) ||
+              (constraint.type === "BLOCK" && together)
+            )
+              throw new AppError(400, "Manual teams violate a pair constraint");
+          }
           return {
             teams: input.teams.map((pair) => ({
               members: [
@@ -63,7 +90,7 @@ export async function POST(req: Request) {
                 candidateMap.get(pair[1])!.rating,
             })),
             benched: players
-              .filter((player) => !ids.includes(player.id))
+              .filter((player) => benched.includes(player.id))
               .map((player) => candidateMap.get(player.id)!),
             imbalance: 0,
           };
@@ -80,6 +107,11 @@ export async function POST(req: Request) {
       throw new AppError(400, "Winner Stays On requires at least three teams");
     if (input.format === "GROUPS_KNOCKOUT" && built.teams.length < 4)
       throw new AppError(400, "Groups + Knockout requires at least four teams");
+    if (
+      (input.format === "ROUND_ROBIN" || input.format === "KNOCKOUT") &&
+      built.teams.length < 2
+    )
+      throw new AppError(400, "This format requires at least two teams");
     const session = await prisma.$transaction(async (tx) => {
       const created = await tx.session.create({
         data: {
@@ -122,6 +154,25 @@ export async function POST(req: Request) {
           }),
         ),
       );
+      if (input.format === "WINNER_STAYS")
+        await tx.session.update({
+          where: { id: created.id },
+          data: {
+            progression: { queue: teams.slice(2).map((team) => team.id) },
+          },
+        });
+      if (input.format === "KNOCKOUT") {
+        const base = 2 ** Math.floor(Math.log2(Math.max(2, teams.length)));
+        const byeCount = teams.length - 2 * (teams.length - base);
+        await tx.session.update({
+          where: { id: created.id },
+          data: {
+            progression: {
+              byeTeams: teams.slice(0, byeCount).map((team) => team.id),
+            },
+          },
+        });
+      }
       let fixtures =
         input.format === "ROUND_ROBIN"
           ? roundRobin(teams)
@@ -144,8 +195,10 @@ export async function POST(req: Request) {
           awayTeamId: fixture.awayId,
           round: fixture.round,
           sequence: fixture.sequence,
+          group: fixture.group,
           sessionId: created.id,
           status: fixture.sequence === 0 ? "LIVE" : "PENDING",
+          ...(fixture.sequence === 0 ? { startedAt: new Date() } : {}),
         })),
       });
       return tx.session.findUniqueOrThrow({

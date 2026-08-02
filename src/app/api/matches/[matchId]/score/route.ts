@@ -1,7 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { failure, AppError } from "@/lib/http";
 import { scoreActionSchema } from "@/lib/validation";
-import { scoreFromEvents, type Preset, type ScoreEvent } from "@/lib/scoring";
+import {
+  activeEvents,
+  scoreFromEvents,
+  type Preset,
+  type ScoreEvent,
+} from "@/lib/scoring";
 import { advanceSession } from "@/lib/progression";
 
 export async function POST(
@@ -32,12 +37,28 @@ export async function POST(
         current.session.scoringPreset as Preset,
         current.session.gameRule,
       );
+      const claimRevision = async () => {
+        const claim = await tx.match.updateMany({
+          where: {
+            id: matchId,
+            revision: input.revision,
+            status: current.status,
+          },
+          data: { revision: { increment: 1 } },
+        });
+        if (claim.count !== 1)
+          throw new AppError(
+            409,
+            "This match changed elsewhere. Refresh and try again.",
+          );
+      };
       if (input.action === "CONFIRM") {
         if (
           score.winner === undefined ||
           current.status !== "AWAITING_CONFIRMATION"
         )
           throw new AppError(400, "Finish the match before confirming it");
+        await claimRevision();
         const winnerTeamId =
           score.winner === 0 ? current.homeTeamId : current.awayTeamId;
         await tx.matchResult.create({
@@ -60,14 +81,14 @@ export async function POST(
             awayGames: score.totalGames[1],
             homeSets: score.sets[0],
             awaySets: score.sets[1],
-            revision: { increment: 1 },
           },
         });
         await advanceSession(tx, current.sessionId);
         return confirmed;
       }
       if (input.action === "UNDO") {
-        if (!events.length) throw new AppError(400, "There is nothing to undo");
+        if (!activeEvents(events).length)
+          throw new AppError(400, "There is nothing to undo");
       } else {
         if (input.winner === undefined)
           throw new AppError(400, "Choose a winning team");
@@ -76,6 +97,8 @@ export async function POST(
           current.status !== "AWAITING_CONFIRMATION"
         )
           throw new AppError(400, "Only the live match may be scored");
+        if (current.status === "AWAITING_CONFIRMATION")
+          throw new AppError(400, "Undo or confirm the completed match");
         if (
           current.session.inputMode === "POINTS" &&
           input.action !== "POINT" &&
@@ -90,8 +113,29 @@ export async function POST(
             400,
             "Game-mode matches cannot accept individual points",
           );
-        if (input.action === "TIEBREAK_GAME" && !score.tiebreak)
+        if (
+          (input.action === "TIEBREAK_GAME" ||
+            input.action === "TIEBREAK_WINNER") &&
+          !score.tiebreak
+        )
           throw new AppError(400, "A tiebreak is only available at 6–6");
+        if (
+          current.session.inputMode === "GAMES" &&
+          score.tiebreak &&
+          input.action !== "TIEBREAK_WINNER"
+        )
+          throw new AppError(
+            400,
+            "Game-only matches use the dedicated tiebreak winner action",
+          );
+        if (
+          current.session.inputMode === "POINTS" &&
+          input.action === "TIEBREAK_WINNER"
+        )
+          throw new AppError(
+            400,
+            "Point-mode tiebreaks are scored point by point",
+          );
         if (input.action === "TEAM_GAME" && score.tiebreak)
           throw new AppError(
             400,
@@ -102,6 +146,7 @@ export async function POST(
         input.action === "UNDO"
           ? { type: "UNDO" as const }
           : { type: input.action, winner: input.winner! };
+      await claimRevision();
       await tx.scoreEvent.create({
         data: {
           matchId,
@@ -124,7 +169,6 @@ export async function POST(
           homeSets: next.sets[0],
           awaySets: next.sets[1],
           status: next.winner === undefined ? "LIVE" : "AWAITING_CONFIRMATION",
-          revision: { increment: 1 },
         },
       });
     });

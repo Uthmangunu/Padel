@@ -6,6 +6,40 @@ type Fixture = {
   round: number;
   sequence: number;
 };
+type Completed = {
+  homeTeamId: string;
+  awayTeamId: string;
+  winnerTeamId: string | null;
+  homeGames: number;
+  awayGames: number;
+};
+export function groupStandings(
+  teamIds: string[],
+  matches: Completed[],
+  seeds: Map<string, number>,
+) {
+  const table = new Map(
+    teamIds.map((id) => [id, { id, wins: 0, diff: 0, games: 0 }]),
+  );
+  for (const match of matches) {
+    if (!match.winnerTeamId) continue;
+    const home = table.get(match.homeTeamId);
+    const away = table.get(match.awayTeamId);
+    if (!home || !away) continue;
+    home.diff += match.homeGames - match.awayGames;
+    away.diff += match.awayGames - match.homeGames;
+    home.games += match.homeGames;
+    away.games += match.awayGames;
+    table.get(match.winnerTeamId)!.wins += 1;
+  }
+  return [...table.values()].sort(
+    (a, b) =>
+      b.wins - a.wins ||
+      b.diff - a.diff ||
+      b.games - a.games ||
+      seeds.get(a.id)! - seeds.get(b.id)!,
+  );
+}
 
 /** Keeps the one-court invariant in the same transaction as confirmation. */
 export async function advanceSession(tx: Tx, sessionId: string) {
@@ -41,10 +75,13 @@ export async function advanceSession(tx: Tx, sessionId: string) {
     const winner = last.winnerTeamId!;
     const loser =
       last.homeTeamId === winner ? last.awayTeamId : last.homeTeamId;
-    const queued = session.teams
-      .map((team) => team.id)
-      .filter((id) => id !== winner && id !== loser);
-    const challenger = queued[0];
+    const state = (session.progression as { queue?: string[] } | null) ?? {};
+    const queue =
+      state.queue ??
+      session.teams
+        .map((team) => team.id)
+        .filter((id) => id !== winner && id !== loser);
+    const challenger = queue[0];
     if (!challenger) {
       await complete(tx, sessionId);
       return;
@@ -60,13 +97,22 @@ export async function advanceSession(tx: Tx, sessionId: string) {
         startedAt: new Date(),
       },
     });
+    await tx.session.update({
+      where: { id: sessionId },
+      data: { progression: { queue: [...queue.slice(1), loser] } },
+    });
     return;
   }
   if (session.format === "KNOCKOUT") {
     const lastRound = Math.max(...confirmed.map((match) => match.round));
     const round = confirmed.filter((match) => match.round === lastRound);
     if (round.length >= 1 && round.every((match) => match.winnerTeamId)) {
-      const winners = round.map((match) => match.winnerTeamId!);
+      const state =
+        (session.progression as { byeTeams?: string[] } | null) ?? {};
+      const winners = [
+        ...round.map((match) => match.winnerTeamId!),
+        ...(state.byeTeams ?? []),
+      ];
       if (winners.length === 1) {
         await complete(tx, sessionId);
         return;
@@ -89,6 +135,10 @@ export async function advanceSession(tx: Tx, sessionId: string) {
             ...(index === 0 ? { startedAt: new Date() } : {}),
           })),
         });
+        await tx.session.update({
+          where: { id: sessionId },
+          data: { progression: { byeTeams: [] } },
+        });
         return;
       }
     }
@@ -96,20 +146,28 @@ export async function advanceSession(tx: Tx, sessionId: string) {
   if (session.format === "GROUPS_KNOCKOUT") {
     const groupRounds = confirmed.filter((match) => match.round === 1);
     if (groupRounds.length && confirmed.length === groupRounds.length) {
-      const tally = new Map<string, number>();
-      for (const match of groupRounds)
-        tally.set(
-          match.winnerTeamId!,
-          (tally.get(match.winnerTeamId!) ?? 0) + 1,
-        );
-      const seeds = [...tally].sort((a, b) => b[1] - a[1]).map(([id]) => id);
-      if (seeds.length >= 4) {
+      const seeds = new Map(session.teams.map((team) => [team.id, team.seed]));
+      const groupA = groupRounds.filter((match) => match.group === "A");
+      const groupB = groupRounds.filter((match) => match.group === "B");
+      const aTeams = [
+        ...new Set(
+          groupA.flatMap((match) => [match.homeTeamId, match.awayTeamId]),
+        ),
+      ];
+      const bTeams = [
+        ...new Set(
+          groupB.flatMap((match) => [match.homeTeamId, match.awayTeamId]),
+        ),
+      ];
+      const a = groupStandings(aTeams, groupA, seeds);
+      const b = groupStandings(bTeams, groupB, seeds);
+      if (a.length >= 2 && b.length >= 2) {
         await tx.match.createMany({
           data: [
             {
               sessionId,
-              homeTeamId: seeds[0],
-              awayTeamId: seeds[3],
+              homeTeamId: a[0].id,
+              awayTeamId: b[1].id,
               round: 2,
               sequence: session.matches.length,
               status: "LIVE",
@@ -117,8 +175,8 @@ export async function advanceSession(tx: Tx, sessionId: string) {
             },
             {
               sessionId,
-              homeTeamId: seeds[1],
-              awayTeamId: seeds[2],
+              homeTeamId: b[0].id,
+              awayTeamId: a[1].id,
               round: 2,
               sequence: session.matches.length + 1,
               status: "PENDING",

@@ -5,7 +5,7 @@ services:
       POSTGRES_DB: padel
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports: ["5432:5432"]
+    ports: ["5433:5432"]
     volumes: ["padel_postgres:/var/lib/postgresql/data"]
 volumes:
   padel_postgres:

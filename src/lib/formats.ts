@@ -23,13 +23,26 @@ export function roundRobin(teams: FormatTeam[], group?: "A" | "B"): Fixture[] {
 }
 export function knockout(teams: FormatTeam[]): Fixture[] {
   const sorted = [...teams].sort((a, b) => a.seed - b.seed);
-  const size = 2 ** Math.ceil(Math.log2(Math.max(2, sorted.length)));
+  const base = 2 ** Math.floor(Math.log2(Math.max(2, sorted.length)));
+  const playInTeams = 2 * (sorted.length - base);
+  const firstPlayIn = sorted.length - playInTeams;
   const out: Fixture[] = [];
-  for (let index = 0; index < size / 2; index += 1) {
-    const home = sorted[index];
-    const away = sorted[size - 1 - index];
-    if (home && away)
+  if (sorted.length === base) {
+    for (let index = 0; index < sorted.length / 2; index += 1)
+      out.push({
+        homeId: sorted[index].id,
+        awayId: sorted[sorted.length - 1 - index].id,
+        round: 1,
+        sequence: index,
+      });
+    return out;
+  }
+  for (let index = 0; index < playInTeams / 2; index += 1) {
+    const home = sorted[firstPlayIn + index];
+    const away = sorted[sorted.length - 1 - index];
+    if (home && away) {
       out.push({ homeId: home.id, awayId: away.id, round: 1, sequence: index });
+    }
   }
   return out;
 }

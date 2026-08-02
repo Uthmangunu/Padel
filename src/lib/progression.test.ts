@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advanceSession } from "./progression";
+import { advanceSession, groupStandings } from "./progression";
 const match = (overrides: Record<string, unknown> = {}) => ({
   id: "m",
   homeTeamId: "a",
@@ -63,6 +63,20 @@ describe("session progression", () => {
       data: { homeTeamId: "a", awayTeamId: "c", status: "LIVE" },
     });
   });
+  it("keeps a loser rotating at the tail of a persisted winner-stays queue", async () => {
+    const tx = txFor({
+      id: "s",
+      format: "WINNER_STAYS",
+      progression: { queue: ["c", "d"] },
+      matches: [match({ status: "CONFIRMED", winnerTeamId: "a" })],
+      teams: [team("a"), team("b"), team("c"), team("d")],
+    });
+    await advanceSession(tx, "s");
+    expect(tx.calls[1]).toMatchObject({
+      op: "complete",
+      data: { progression: { queue: ["d", "b"] } },
+    });
+  });
   it("creates a knockout final from round winners", async () => {
     const tx = txFor({
       id: "s",
@@ -85,7 +99,13 @@ describe("session progression", () => {
   });
   it("builds group semi-finals after group fixtures", async () => {
     const games = [
-      match({ id: "1", status: "CONFIRMED", winnerTeamId: "a", sequence: 0 }),
+      match({
+        id: "1",
+        status: "CONFIRMED",
+        winnerTeamId: "a",
+        sequence: 0,
+        group: "A",
+      }),
       match({
         id: "2",
         homeTeamId: "b",
@@ -93,6 +113,7 @@ describe("session progression", () => {
         status: "CONFIRMED",
         winnerTeamId: "b",
         sequence: 1,
+        group: "A",
       }),
       match({
         id: "3",
@@ -101,6 +122,7 @@ describe("session progression", () => {
         status: "CONFIRMED",
         winnerTeamId: "c",
         sequence: 2,
+        group: "B",
       }),
       match({
         id: "4",
@@ -109,6 +131,7 @@ describe("session progression", () => {
         status: "CONFIRMED",
         winnerTeamId: "d",
         sequence: 3,
+        group: "B",
       }),
     ];
     const tx = txFor({
@@ -119,5 +142,34 @@ describe("session progression", () => {
     });
     await advanceSession(tx, "s");
     expect(tx.calls[0]).toMatchObject({ op: "many" });
+  });
+  it("ranks a group by wins, game differential, games, then seed", () => {
+    const seeds = new Map([
+      ["a", 1],
+      ["b", 2],
+      ["c", 3],
+    ]);
+    expect(
+      groupStandings(
+        ["a", "b", "c"],
+        [
+          {
+            homeTeamId: "a",
+            awayTeamId: "b",
+            winnerTeamId: "a",
+            homeGames: 6,
+            awayGames: 4,
+          },
+          {
+            homeTeamId: "c",
+            awayTeamId: "a",
+            winnerTeamId: "c",
+            homeGames: 6,
+            awayGames: 2,
+          },
+        ],
+        seeds,
+      ).map((row) => row.id),
+    ).toEqual(["c", "a", "b"]);
   });
 });

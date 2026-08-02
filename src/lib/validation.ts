@@ -31,6 +31,13 @@ export const sessionSchema = z.object({
 });
 export const scoreActionSchema = z.object({
   revision: z.number().int().nonnegative(),
-  action: z.enum(["POINT", "TEAM_GAME", "TIEBREAK_GAME", "UNDO", "CONFIRM"]),
+  action: z.enum([
+    "POINT",
+    "TEAM_GAME",
+    "TIEBREAK_GAME",
+    "TIEBREAK_WINNER",
+    "UNDO",
+    "CONFIRM",
+  ]),
   winner: z.union([z.literal(0), z.literal(1)]).optional(),
 });

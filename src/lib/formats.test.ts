@@ -6,6 +6,14 @@ describe("formats", () => {
     expect(roundRobin(teams)).toHaveLength(6));
   it("makes deterministic knockout fixtures", () =>
     expect(knockout(teams)[0]).toMatchObject({ homeId: "1", awayId: "4" }));
+  it("creates only play-in matches when three or five teams need byes", () => {
+    expect(knockout(teams.slice(0, 3))).toEqual([
+      { homeId: "2", awayId: "3", round: 1, sequence: 0 },
+    ]);
+    expect(knockout([...teams, { id: "5", seed: 5 }])).toEqual([
+      { homeId: "4", awayId: "5", round: 1, sequence: 0 },
+    ]);
+  });
   it("snake-seeds groups", () => {
     const x = groups(teams);
     expect(x.a.length + x.b.length).toBe(4);

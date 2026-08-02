@@ -1,7 +1,8 @@
 export type TeamIndex = 0 | 1;
 export type Preset = "RACE_TO_3" | "RACE_TO_6" | "BEST_OF_3_STANDARD";
 export type GameRule = "ADVANTAGE" | "GOLDEN_POINT";
-export type ScoreEventType = "POINT" | "TEAM_GAME" | "TIEBREAK_GAME" | "UNDO";
+export type ScoreEventType =
+  "POINT" | "TEAM_GAME" | "TIEBREAK_GAME" | "TIEBREAK_WINNER" | "UNDO";
 export type ScoreEvent = { type: ScoreEventType; winner?: TeamIndex };
 export type SetScore = { games: [number, number]; tiebreak?: [number, number] };
 export type MatchScore = {
@@ -72,9 +73,10 @@ function applyEvent(
     if (!isTiebreak(score)) awardGame(score, event.winner, preset);
     return score;
   }
-  if (event.type === "TIEBREAK_GAME") {
+  if (event.type === "TIEBREAK_GAME" || event.type === "TIEBREAK_WINNER") {
     if (!isTiebreak(score)) return score;
-    score.tiebreak![event.winner] += 1;
+    if (event.type === "TIEBREAK_WINNER") score.tiebreak![event.winner] = 7;
+    else score.tiebreak![event.winner] += 1;
     const loser = other(event.winner);
     if (
       score.tiebreak![event.winner] >= 7 &&

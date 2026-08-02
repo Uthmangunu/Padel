@@ -88,4 +88,18 @@ describe("event-sourced scoring", () => {
     expect(s.setScores).toEqual([{ games: [6, 7], tiebreak: [0, 7] }]);
     expect(s.totalGames).toEqual([6, 7]);
   });
+  it("accepts one game-mode tiebreak winner event", () => {
+    const s = scoreFromEvents(
+      [
+        ...Array.from({ length: 12 }, (_, index) => ({
+          type: "TEAM_GAME" as const,
+          winner: (index % 2) as 0 | 1,
+        })),
+        { type: "TIEBREAK_WINNER" as const, winner: 0 as 0 | 1 },
+      ],
+      "BEST_OF_3_STANDARD",
+      "ADVANTAGE",
+    );
+    expect(s.setScores).toEqual([{ games: [7, 6], tiebreak: [7, 0] }]);
+  });
 });

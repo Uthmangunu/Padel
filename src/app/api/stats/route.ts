@@ -148,6 +148,9 @@ export async function GET(req: Request) {
           }
         }
     }
+    const names = new Map(
+      [...records.values()].map((record) => [record.id, record.name]),
+    );
     const players = [...records.values()].map((record) => {
       const qualified = [...record.partners.entries()]
         .filter(([, value]) => value.games >= 3)
@@ -170,9 +173,21 @@ export async function GET(req: Request) {
           opportunities: record.clutchOpportunities,
           eligibleMatches: record.eligible,
         },
-        bestPartner: qualified.at(-1)?.[0] ?? null,
-        worstPartner: qualified[0]?.[0] ?? null,
-        headToHead: Object.fromEntries(record.h2h),
+        bestPartner: qualified.at(-1)
+          ? {
+              name: names.get(qualified.at(-1)![0]) ?? qualified.at(-1)![0],
+              ...qualified.at(-1)![1],
+            }
+          : null,
+        worstPartner: qualified[0]
+          ? {
+              name: names.get(qualified[0][0]) ?? qualified[0][0],
+              ...qualified[0][1],
+            }
+          : null,
+        headToHead: Object.fromEntries(
+          [...record.h2h].map(([id, value]) => [names.get(id) ?? id, value]),
+        ),
         rolling10: record.trend.slice(-10),
       };
     });

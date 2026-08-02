@@ -21,6 +21,7 @@ type Match = {
   status: string;
   revision: number;
   startedAt?: string;
+  endedAt?: string;
   score?: Score;
   homeTeam: { name: string };
   awayTeam: { name: string };
@@ -36,6 +37,14 @@ const call = async <T,>(url: string, init?: RequestInit) => {
     throw new Error((await response.json()).error ?? "Request failed");
   return response.json() as Promise<T>;
 };
+const tennis = (own: number, other: number) =>
+  own < 3
+    ? ["0", "15", "30"][own]
+    : own === other || (own === 3 && other < 3)
+      ? "40"
+      : own > other
+        ? "AD"
+        : "40";
 export function PadelApp({ initialLists }: { initialLists: List[] }) {
   const [lists, setLists] = useState(initialLists);
   const [listId, setListId] = useState(initialLists[0]?.id ?? "");
@@ -49,6 +58,8 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   > | null>(null);
   const [previous, setPrevious] = useState<string[][]>([]);
   const [constraints, setConstraints] = useState<Constraint[]>([]);
+  const [constraintA, setConstraintA] = useState("");
+  const [constraintB, setConstraintB] = useState("");
   const [manual, setManual] = useState<string[][]>([]);
   const [format, setFormat] = useState<Format>("ROUND_ROBIN");
   const [preset, setPreset] = useState<
@@ -71,8 +82,15 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       currentStreak: number;
       bestStreak: number;
       clutch: { wins: number; opportunities: number; eligibleMatches: number };
+      winRate: number;
+      bestPartner: { name: string; wins: number; games: number } | null;
+      worstPartner: { name: string; wins: number; games: number } | null;
+      headToHead: Record<string, { wins: number; losses: number }>;
+      rolling10: boolean[];
     }>;
   } | null>(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [notice, setNotice] = useState("");
   const [seconds, setSeconds] = useState(0);
   const active = useMemo(
@@ -93,7 +111,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         .catch((error: Error) => setNotice(error.message));
   }, [listId]);
   useEffect(() => {
-    if (!match?.startedAt) return;
+    if (!match?.startedAt || match.endedAt) return;
     const timer = window.setInterval(
       () =>
         setSeconds(
@@ -104,11 +122,11 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       1000,
     );
     return () => window.clearInterval(timer);
-  }, [match?.startedAt]);
+  }, [match?.startedAt, match?.endedAt]);
   useEffect(() => {
     if (!listId) return;
     void call<Array<{ matches: Array<{ id: string; status: string }> }>>(
-      "/api/sessions",
+      `/api/sessions?listId=${listId}&status=ACTIVE`,
     )
       .then((sessions) => {
         const live = sessions
@@ -142,6 +160,12 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
     setLists((value) =>
       value.map((list) => (list.id === item.id ? item : list)),
     );
+  };
+  const archiveList = async () => {
+    if (!active || !confirm(`Archive ${active.name}?`)) return;
+    await call(`/api/lists/${active.id}`, { method: "DELETE" });
+    setLists((value) => value.filter((list) => list.id !== active.id));
+    setListId("");
   };
   const addPlayer = async () => {
     const name = prompt("Player name");
@@ -196,19 +220,22 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
     }
   };
   const addConstraint = (type: Constraint["type"]) => {
-    const names = roster
-      .map((player) => `${player.id}:${player.name}`)
-      .join("\n");
-    const first = prompt(`First player id\n${names}`);
-    const second = prompt("Second player id");
-    if (first && second)
-      setConstraints((value) => [
-        ...value,
-        { type, playerA: first, playerB: second },
-      ]);
+    if (!constraintA || !constraintB || constraintA === constraintB) {
+      setNotice("Choose two different players for the constraint.");
+      return;
+    }
+    setConstraints((value) => [
+      ...value,
+      { type, playerA: constraintA, playerB: constraintB },
+    ]);
   };
   const createSession = async () => {
     if (!teams || !manual.length) return;
+    const memberIds = manual.flat();
+    if (new Set(memberIds).size !== memberIds.length) {
+      setNotice("A player cannot be in more than one team.");
+      return;
+    }
     try {
       const session = await call<{ matches: Array<{ id: string }> }>(
         "/api/sessions",
@@ -223,6 +250,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             scoringPreset: preset,
             playerIds: selected,
             teams: manual.map((pair) => [pair[0], pair[1]]),
+            benchedIds: selected.filter((id) => !memberIds.includes(id)),
             constraints,
           }),
         },
@@ -244,7 +272,13 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
     }
   };
   const score = async (
-    action: "POINT" | "TEAM_GAME" | "TIEBREAK_GAME" | "UNDO" | "CONFIRM",
+    action:
+      | "POINT"
+      | "TEAM_GAME"
+      | "TIEBREAK_GAME"
+      | "TIEBREAK_WINNER"
+      | "UNDO"
+      | "CONFIRM",
     winner?: 0 | 1,
   ) => {
     if (!match) return;
@@ -254,20 +288,37 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         body: JSON.stringify({ revision: match.revision, action, winner }),
       });
       setMatch((value) => (value ? { ...value, ...updated } : updated));
-      if (action === "CONFIRM")
-        setNotice("Result confirmed and the next court has been activated.");
+      if (action === "CONFIRM") {
+        const sessions = await call<
+          Array<{ matches: Array<{ id: string; status: string }> }>
+        >(`/api/sessions?listId=${listId}&status=ACTIVE`);
+        const next = sessions
+          .flatMap((session) => session.matches)
+          .find((item) => item.status === "LIVE");
+        if (next) await openMatch(next.id);
+        else {
+          setMatch(null);
+          setNotice("Session complete — all results are confirmed.");
+        }
+      }
     } catch (error) {
       setNotice((error as Error).message);
     }
   };
   const loadStats = () => {
     if (listId)
-      void call<typeof stats>(`/api/stats?listId=${listId}`)
+      void call<typeof stats>(
+        `/api/stats?listId=${listId}&from=${from}&to=${to}`,
+      )
         .then(setStats)
         .catch((error: Error) => setNotice(error.message));
   };
   const share = async () => {
-    if (!match) return;
+    if (
+      !match ||
+      (match.status !== "AWAITING_CONFIRMATION" && match.status !== "CONFIRMED")
+    )
+      return;
     const text = formatMatchShare({
       session: active?.name ?? "Padel session",
       home: match.homeTeam.name,
@@ -313,6 +364,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           <button className="btn btn-secondary" onClick={renameList}>
             Rename
           </button>
+          <button className="btn btn-secondary" onClick={archiveList}>
+            Archive
+          </button>
           <button className="btn btn-secondary" onClick={addList}>
             New list
           </button>
@@ -354,6 +408,26 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             <button className="btn" onClick={addPlayer}>
               Add player
             </button>
+          </div>
+          <div className="grid-2 mb-4 grid">
+            <label>
+              From
+              <input
+                className="field"
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+              />
+            </label>
+            <label>
+              To
+              <input
+                className="field"
+                type="date"
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+              />
+            </label>
           </div>
           <div className="grid-2 grid">
             {players.map((player) => (
@@ -477,16 +551,55 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                 Block pair
               </button>
             </div>
+            <div className="grid-2 mt-3 grid">
+              <select
+                className="field"
+                aria-label="First constrained player"
+                value={constraintA}
+                onChange={(event) => setConstraintA(event.target.value)}
+              >
+                <option value="">First player</option>
+                {roster.map((player) => (
+                  <option key={player.id} value={player.id}>
+                    {player.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="field"
+                aria-label="Second constrained player"
+                value={constraintB}
+                onChange={(event) => setConstraintB(event.target.value)}
+              >
+                <option value="">Second player</option>
+                {roster.map((player) => (
+                  <option key={player.id} value={player.id}>
+                    {player.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             {constraints.length > 0 && (
-              <p className="text-sm">
+              <div className="text-sm">
                 Constraints:{" "}
-                {constraints
-                  .map(
-                    (item) =>
-                      `${item.type.toLowerCase()} ${item.playerA} / ${item.playerB}`,
-                  )
-                  .join(" · ")}
-              </p>
+                {constraints.map((item, index) => (
+                  <button
+                    key={`${item.type}-${index}`}
+                    className="pill mr-2"
+                    onClick={() =>
+                      setConstraints((value) =>
+                        value.filter((_, itemIndex) => itemIndex !== index),
+                      )
+                    }
+                  >
+                    {item.type.toLowerCase()}{" "}
+                    {roster.find((player) => player.id === item.playerA)?.name}{" "}
+                    /{" "}
+                    {roster.find((player) => player.id === item.playerB)?.name}{" "}
+                    ×
+                  </button>
+                ))}
+              </div>
             )}
             {teams && (
               <>
@@ -512,6 +625,25 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                             value.map((pair, pairIndex) =>
                               pairIndex === index
                                 ? [event.target.value, pair[1]]
+                                : pair,
+                            ),
+                          )
+                        }
+                      >
+                        {roster.map((player) => (
+                          <option key={player.id} value={player.id}>
+                            {player.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="field mt-2"
+                        value={manual[index]?.[1] ?? ""}
+                        onChange={(event) =>
+                          setManual((value) =>
+                            value.map((pair, pairIndex) =>
+                              pairIndex === index
+                                ? [pair[0], event.target.value]
                                 : pair,
                             ),
                           )
@@ -570,7 +702,11 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   </strong>
                   <p>
                     {match.score?.sets[0] ?? 0} sets ·{" "}
-                    {match.score?.tiebreak?.[0] ?? match.score?.points[0] ?? 0}{" "}
+                    {match.score?.tiebreak?.[0] ??
+                      tennis(
+                        match.score?.points[0] ?? 0,
+                        match.score?.points[1] ?? 0,
+                      )}{" "}
                     {match.score?.tiebreak ? "tiebreak" : "points"}
                   </p>
                 </div>
@@ -581,7 +717,11 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   </strong>
                   <p>
                     {match.score?.sets[1] ?? 0} sets ·{" "}
-                    {match.score?.tiebreak?.[1] ?? match.score?.points[1] ?? 0}{" "}
+                    {match.score?.tiebreak?.[1] ??
+                      tennis(
+                        match.score?.points[1] ?? 0,
+                        match.score?.points[0] ?? 0,
+                      )}{" "}
                     {match.score?.tiebreak ? "tiebreak" : "points"}
                   </p>
                 </div>
@@ -592,7 +732,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   onClick={() =>
                     score(
                       match.score?.tiebreak
-                        ? "TIEBREAK_GAME"
+                        ? match.session.inputMode === "GAMES"
+                          ? "TIEBREAK_WINNER"
+                          : "TIEBREAK_GAME"
                         : match.session.inputMode === "POINTS"
                           ? "POINT"
                           : "TEAM_GAME",
@@ -602,7 +744,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                 >
                   {match.homeTeam.name} wins{" "}
                   {match.score?.tiebreak
-                    ? "tiebreak point"
+                    ? match.session.inputMode === "GAMES"
+                      ? "tiebreak"
+                      : "tiebreak point"
                     : match.session.inputMode === "POINTS"
                       ? "point"
                       : "game"}
@@ -612,7 +756,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   onClick={() =>
                     score(
                       match.score?.tiebreak
-                        ? "TIEBREAK_GAME"
+                        ? match.session.inputMode === "GAMES"
+                          ? "TIEBREAK_WINNER"
+                          : "TIEBREAK_GAME"
                         : match.session.inputMode === "POINTS"
                           ? "POINT"
                           : "TEAM_GAME",
@@ -622,7 +768,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                 >
                   {match.awayTeam.name} wins{" "}
                   {match.score?.tiebreak
-                    ? "tiebreak point"
+                    ? match.session.inputMode === "GAMES"
+                      ? "tiebreak"
+                      : "tiebreak point"
                     : match.session.inputMode === "POINTS"
                       ? "point"
                       : "game"}
@@ -640,9 +788,12 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                     Confirm result
                   </button>
                 )}
-                <button className="btn btn-secondary" onClick={share}>
-                  Share result
-                </button>
+                {(match.status === "AWAITING_CONFIRMATION" ||
+                  match.status === "CONFIRMED") && (
+                  <button className="btn btn-secondary" onClick={share}>
+                    Share result
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -683,12 +834,36 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                       Games diff: {player.gamesDifferential > 0 ? "+" : ""}
                       {player.gamesDifferential}
                       <br />
+                      win rate: {(player.winRate * 100).toFixed(0)}%
+                      <br />
                       vs expected: {player.performanceVsExpected.toFixed(2)}
                       <br />
                       streak: {player.currentStreak} (best {player.bestStreak})
                       <br />
                       clutch: {player.clutch.wins}/{player.clutch.opportunities}{" "}
                       ({player.clutch.eligibleMatches} eligible)
+                      <br />
+                      best partner:{" "}
+                      {player.bestPartner
+                        ? `${player.bestPartner.name} (${player.bestPartner.wins}/${player.bestPartner.games})`
+                        : "—"}
+                      ; worst:{" "}
+                      {player.worstPartner
+                        ? `${player.worstPartner.name} (${player.worstPartner.wins}/${player.worstPartner.games})`
+                        : "—"}
+                      <br />
+                      last 10:{" "}
+                      {player.rolling10
+                        .map((won) => (won ? "W" : "L"))
+                        .join(" ") || "—"}
+                      <br />
+                      H2H:{" "}
+                      {Object.entries(player.headToHead)
+                        .map(
+                          ([id, record]) =>
+                            `${id} ${record.wins}-${record.losses}`,
+                        )
+                        .join(", ") || "—"}
                     </p>
                   </article>
                 ))}

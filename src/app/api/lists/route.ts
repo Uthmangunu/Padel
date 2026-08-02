@@ -5,6 +5,7 @@ export async function GET() {
   try {
     return Response.json(
       await prisma.list.findMany({
+        where: { active: true },
         include: {
           _count: {
             select: { players: { where: { active: true } }, sessions: true },
