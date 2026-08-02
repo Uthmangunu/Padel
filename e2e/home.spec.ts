@@ -55,6 +55,26 @@ test("runs a persistent race-to-three session and exposes stats", async ({
     page.getByRole("button", { name: "Confirm result" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Confirm result" }).click();
+  await expect(page.getByText("ROUND ROBIN progress")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Share session" }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("table")
+      .getByText(/Youssef|Saif/)
+      .first(),
+  ).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "score" }).click();
+  await expect(page.getByText("Recent sessions")).toBeVisible();
+  await page
+    .getByText(/Friday Padel session/i)
+    .first()
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Share session" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "stats" }).click();
   await expect(page.getByText("Player statistics")).toBeVisible();
   await expect(

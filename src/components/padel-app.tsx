@@ -91,6 +91,14 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   );
   const [inputMode, setInputMode] = useState<"POINTS" | "GAMES">("POINTS");
   const [match, setMatch] = useState<Match | null>(null);
+  const [recentSessions, setRecentSessions] = useState<
+    Array<{
+      id: string;
+      name: string;
+      status: string;
+      matches: Array<{ id: string; sequence: number }>;
+    }>
+  >([]);
   const [stats, setStats] = useState<{
     coverage: { pointModeMatches: number; totalMatches: number };
     players: Array<{
@@ -158,6 +166,16 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           );
         if (live) void openMatch(live.id);
       })
+      .catch(() => undefined);
+    void call<
+      Array<{
+        id: string;
+        name: string;
+        status: string;
+        matches: Array<{ id: string; sequence: number }>;
+      }>
+    >(`/api/sessions?listId=${listId}`)
+      .then(setRecentSessions)
       .catch(() => undefined);
   }, [listId]);
   const addList = async () => {
@@ -318,9 +336,19 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           .find((item) => item.status === "LIVE");
         if (next) await openMatch(next.id);
         else {
-          setMatch(null);
-          setNotice("Session complete — all results are confirmed.");
+          await openMatch(match.id);
+          setNotice(
+            "Session complete — final standings and sharing remain available.",
+          );
         }
+        void call<
+          Array<{
+            id: string;
+            name: string;
+            status: string;
+            matches: Array<{ id: string; sequence: number }>;
+          }>
+        >(`/api/sessions?listId=${listId}`).then(setRecentSessions);
       }
     } catch (error) {
       setNotice((error as Error).message);
@@ -732,6 +760,29 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             <div className="card">
               <h2 className="mt-0">No live match</h2>
               <p>Start or resume a session from Teams.</p>
+              {recentSessions.length > 0 && (
+                <div className="mt-4">
+                  <b>Recent sessions</b>
+                  <div className="mt-2 grid">
+                    {recentSessions.slice(0, 5).map((session) => {
+                      const last = [...session.matches].sort(
+                        (a, b) => b.sequence - a.sequence,
+                      )[0];
+                      return (
+                        <button
+                          key={session.id}
+                          className="btn btn-secondary text-left"
+                          disabled={!last}
+                          onClick={() => last && openMatch(last.id)}
+                        >
+                          {session.name} ·{" "}
+                          {session.status.toLowerCase().replaceAll("_", " ")}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="card mx-auto max-w-3xl">

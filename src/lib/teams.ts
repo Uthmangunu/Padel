@@ -61,7 +61,7 @@ export function buildBalancedTeams(
             !blocked.has(key(first.id, second.id)),
         )
         .sort((a, b) => first.rating + a.rating - (first.rating + b.rating))
-        .slice(0, 6);
+        .slice(0, 4);
       for (const second of possible)
         walk(
           remaining.filter(
