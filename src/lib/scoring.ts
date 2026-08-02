@@ -1,48 +1,149 @@
 export type TeamIndex = 0 | 1;
 export type Preset = "RACE_TO_3" | "RACE_TO_6" | "BEST_OF_3_STANDARD";
 export type GameRule = "ADVANTAGE" | "GOLDEN_POINT";
-export type ScoreEvent = { type: "POINT" | "TEAM_GAME" | "TIEBREAK_GAME"; winner: TeamIndex };
+export type ScoreEventType = "POINT" | "TEAM_GAME" | "TIEBREAK_GAME" | "UNDO";
+export type ScoreEvent = { type: ScoreEventType; winner?: TeamIndex };
 export type SetScore = { games: [number, number]; tiebreak?: [number, number] };
-export type MatchScore = { points: [number, number]; games: [number, number]; sets: [number, number]; setScores: SetScore[]; winner?: TeamIndex; clutch: { opportunities: [number, number]; wins: [number, number] } };
+export type MatchScore = {
+  points: [number, number];
+  games: [number, number];
+  sets: [number, number];
+  setScores: SetScore[];
+  totalGames: [number, number];
+  winner?: TeamIndex;
+  tiebreak: [number, number] | null;
+  clutch: { opportunities: [number, number]; wins: [number, number] };
+};
 
-export const initialScore = (): MatchScore => ({ points: [0, 0], games: [0, 0], sets: [0, 0], setScores: [], clutch: { opportunities: [0, 0], wins: [0, 0] } });
-const isTiebreak = (s: MatchScore) => s.games[0] === 6 && s.games[1] === 6;
-const setDone = (g: [number, number]) => (Math.max(...g) >= 6 && Math.abs(g[0] - g[1]) >= 2) || Math.max(...g) === 7;
-const clone = (s: MatchScore): MatchScore => structuredClone(s);
-const gameIsClutch = (p: [number, number], golden: boolean) => golden ? p[0] === 3 && p[1] === 3 : (p[0] >= 3 && p[1] >= 3);
-function addSetOrWin(s: MatchScore, winner: TeamIndex, preset: Preset) {
-  if (preset !== "BEST_OF_3_STANDARD") { s.winner = winner; return; }
-  s.sets[winner]++;
-  s.setScores.push({ games: [...s.games] as [number, number] });
-  s.games = [0, 0]; s.points = [0, 0];
-  if (s.sets[winner] === 2) s.winner = winner;
+export const initialScore = (): MatchScore => ({
+  points: [0, 0],
+  games: [0, 0],
+  sets: [0, 0],
+  setScores: [],
+  totalGames: [0, 0],
+  tiebreak: null,
+  clutch: { opportunities: [0, 0], wins: [0, 0] },
+});
+const other = (team: TeamIndex): TeamIndex => (team === 0 ? 1 : 0);
+const clone = (score: MatchScore) => structuredClone(score);
+export const isTiebreak = (score: MatchScore) => score.tiebreak !== null;
+const setComplete = (games: [number, number]) =>
+  Math.max(...games) >= 6 &&
+  (Math.abs(games[0] - games[1]) >= 2 || Math.max(...games) === 7);
+const clutchPoint = (points: [number, number], rule: GameRule) =>
+  rule === "GOLDEN_POINT"
+    ? points[0] === 3 && points[1] === 3
+    : points[0] >= 3 && points[1] >= 3;
+function completeSet(score: MatchScore, winner: TeamIndex) {
+  score.sets[winner] += 1;
+  score.setScores.push({
+    games: [...score.games] as [number, number],
+    ...(score.tiebreak
+      ? { tiebreak: [...score.tiebreak] as [number, number] }
+      : {}),
+  });
+  score.games = [0, 0];
+  score.points = [0, 0];
+  score.tiebreak = null;
+  if (score.sets[winner] === 2) score.winner = winner;
 }
-function gameWon(s: MatchScore, winner: TeamIndex, preset: Preset) {
-  s.games[winner]++; s.points = [0, 0];
-  if (preset === "RACE_TO_3" && s.games[winner] >= 3) s.winner = winner;
-  if (preset === "RACE_TO_6" && s.games[winner] >= 6) s.winner = winner;
-  if (preset === "BEST_OF_3_STANDARD" && setDone(s.games)) addSetOrWin(s, winner, preset);
-}
-export function reduceScore(before: MatchScore, event: ScoreEvent, preset: Preset, rule: GameRule): MatchScore {
-  const s = clone(before); if (s.winner !== undefined) return s;
-  if (event.type === "TEAM_GAME") { gameWon(s, event.winner, preset); return s; }
-  if (event.type === "TIEBREAK_GAME") {
-    if (!isTiebreak(s)) return s;
-    const tb = s.setScores.at(-1)?.tiebreak ?? [0, 0]; tb[event.winner]++;
-    const other = event.winner === 0 ? 1 : 0;
-    if (tb[event.winner] >= 7 && tb[event.winner] - tb[other] >= 2) { s.games[event.winner]++; s.setScores.push({ games: [7, 6], tiebreak: tb }); addSetOrWin(s,event.winner,preset); }
-    else s.setScores = [...s.setScores.filter((x) => !x.tiebreak), { games: [6,6], tiebreak: tb }];
-    return s;
+function awardGame(score: MatchScore, winner: TeamIndex, preset: Preset) {
+  score.games[winner] += 1;
+  score.totalGames[winner] += 1;
+  score.points = [0, 0];
+  if (preset === "RACE_TO_3" && score.games[winner] === 3)
+    score.winner = winner;
+  if (preset === "RACE_TO_6" && score.games[winner] === 6)
+    score.winner = winner;
+  if (preset === "BEST_OF_3_STANDARD") {
+    if (score.games[0] === 6 && score.games[1] === 6) score.tiebreak = [0, 0];
+    else if (setComplete(score.games)) completeSet(score, winner);
   }
-  if (isTiebreak(s)) return s;
-  const other = event.winner === 0 ? 1 : 0;
-  const clutch = gameIsClutch(s.points, rule === "GOLDEN_POINT");
-  if (clutch) { s.clutch.opportunities[event.winner]++; s.clutch.opportunities[other]++; s.clutch.wins[event.winner]++; }
-  s.points[event.winner]++;
-  if (rule === "GOLDEN_POINT" && s.points[event.winner] >= 4 && s.points[other] >= 3) gameWon(s,event.winner,preset);
-  else if (s.points[event.winner] >= 4 && s.points[event.winner] - s.points[other] >= 2) gameWon(s,event.winner,preset);
-  return s;
 }
-export function scoreFromEvents(events: ScoreEvent[], preset: Preset, rule: GameRule) { return events.reduce((score, event) => reduceScore(score,event,preset,rule), initialScore()); }
-export function pointLabel(value: number, opponent: number) { if (value < 3) return ["0","15","30"][value]; if (value === 3 && opponent < 3) return "40"; if (value === opponent) return "40"; return value > opponent ? "AD" : "40"; }
-export function displayPoints(score: MatchScore, rule: GameRule) { void rule; return [pointLabel(score.points[0],score.points[1]),pointLabel(score.points[1],score.points[0])] as const; }
+function applyEvent(
+  before: MatchScore,
+  event: Exclude<ScoreEvent, { type: "UNDO" }>,
+  preset: Preset,
+  rule: GameRule,
+): MatchScore {
+  const score = clone(before);
+  if (score.winner !== undefined || event.winner === undefined) return score;
+  if (event.type === "TEAM_GAME") {
+    if (!isTiebreak(score)) awardGame(score, event.winner, preset);
+    return score;
+  }
+  if (event.type === "TIEBREAK_GAME") {
+    if (!isTiebreak(score)) return score;
+    score.tiebreak![event.winner] += 1;
+    const loser = other(event.winner);
+    if (
+      score.tiebreak![event.winner] >= 7 &&
+      score.tiebreak![event.winner] - score.tiebreak![loser] >= 2
+    ) {
+      score.games[event.winner] += 1;
+      score.totalGames[event.winner] += 1;
+      completeSet(score, event.winner);
+    }
+    return score;
+  }
+  if (isTiebreak(score)) return score;
+  const loser = other(event.winner);
+  const wasClutch = clutchPoint(score.points, rule);
+  if (wasClutch) {
+    score.clutch.opportunities[0] += 1;
+    score.clutch.opportunities[1] += 1;
+    score.clutch.wins[event.winner] += 1;
+  }
+  score.points[event.winner] += 1;
+  if (
+    (rule === "GOLDEN_POINT" &&
+      score.points[event.winner] >= 4 &&
+      score.points[loser] >= 3) ||
+    (rule === "ADVANTAGE" &&
+      score.points[event.winner] >= 4 &&
+      score.points[event.winner] - score.points[loser] >= 2)
+  )
+    awardGame(score, event.winner, preset);
+  return score;
+}
+export function activeEvents(events: ScoreEvent[]) {
+  const active: Exclude<ScoreEvent, { type: "UNDO" }>[] = [];
+  for (const event of events) {
+    if (event.type === "UNDO") active.pop();
+    else active.push(event);
+  }
+  return active;
+}
+export function scoreFromEvents(
+  events: ScoreEvent[],
+  preset: Preset,
+  rule: GameRule,
+) {
+  return activeEvents(events).reduce(
+    (score, event) => applyEvent(score, event, preset, rule),
+    initialScore(),
+  );
+}
+export function reduceScore(
+  before: MatchScore,
+  event: ScoreEvent,
+  preset: Preset,
+  rule: GameRule,
+) {
+  return event.type === "UNDO"
+    ? before
+    : applyEvent(before, event, preset, rule);
+}
+export function pointLabel(value: number, opponent: number) {
+  if (value < 3) return ["0", "15", "30"][value];
+  if (value === 3 && opponent < 3) return "40";
+  if (value === opponent) return "40";
+  return value > opponent ? "AD" : "40";
+}
+export function displayPoints(score: MatchScore, rule?: GameRule) {
+  void rule;
+  return [
+    pointLabel(score.points[0], score.points[1]),
+    pointLabel(score.points[1], score.points[0]),
+  ] as const;
+}

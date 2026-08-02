@@ -8,12 +8,12 @@ A mobile-first, open-source app for organising recreational padel: keep a roster
 cp .env.example .env
 docker compose up -d
 npm install
-npx prisma db push
+npx prisma migrate dev
 npm run db:seed
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The idempotent seed creates the Friday Padel list and its editable 16-player roster. Run `npm test`, `npm run typecheck`, `npm run lint`, and `npm run build` before submitting changes.
+Open [http://localhost:3000](http://localhost:3000). The idempotent seed creates the Friday Padel list and its editable 16-player roster. Run `npm run format:check`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run test:e2e`, and `npm run build` before submitting changes.
 
 ## What it does
 
@@ -21,8 +21,8 @@ Open [http://localhost:3000](http://localhost:3000). The idempotent seed creates
 - Snapshot-based sessions with fixed two-person teams and explicit benching for an odd roster.
 - A testable team balancer, forced/blocked pair constraints, and support for lineup exclusion during reshuffles.
 - Persistent, append-only score events; advantage or golden-point games; race-to-3, race-to-6, and standard best-of-3; undo until result confirmation.
-- Round robin, knockout, winner-stays-on and group-seeding domain engines. One live court at a time.
-- Expected-performance and coverage-aware stats. Clutch data is deliberately only shown from point-by-point matches.
+- Round robin, knockout, winner-stays-on and group-to-knockout session progression. One live court is atomically activated at a time.
+- Per-player expected-performance, W/L, streak, partner, head-to-head and coverage-aware clutch data. Clutch data is deliberately only shown from point-by-point matches.
 - Formatted text sharing, clipboard/native sharing compatible output, and WhatsApp fallback URLs.
 
 ## Architecture
@@ -33,7 +33,7 @@ The app is public-write by design: anyone who can reach the deployment can alter
 
 ## Deploy
 
-Create a Neon PostgreSQL database, set `DATABASE_URL` in Vercel, then run `npx prisma migrate deploy` and `npm run db:seed` once against that database. Vercel detects Next.js and deploys pull-request previews automatically when connected to GitHub. Production should track `main`; work belongs on `feat/*`, `fix/*`, `chore/*`, `test/*`, or `docs/*` branches.
+Create a Neon PostgreSQL database and set its pooled connection as `DATABASE_URL` and direct connection as `DIRECT_URL` in Vercel, then run `npx prisma migrate deploy` and `npm run db:seed` once against that database. Vercel detects Next.js and deploys pull-request previews automatically when connected to GitHub. Production should track `main`; work belongs on `feat/*`, `fix/*`, `chore/*`, `test/*`, or `docs/*` branches.
 
 ## Deliberately out of scope
 
