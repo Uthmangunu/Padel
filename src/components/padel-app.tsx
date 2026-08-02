@@ -5,7 +5,8 @@ import {
   lineupSignature,
   type Constraint,
 } from "@/lib/teams";
-import { formatMatchShare, whatsappUrl } from "@/lib/share";
+import { formatMatchShare, formatSessionShare, whatsappUrl } from "@/lib/share";
+import { roundRobinStandings } from "@/lib/formats";
 type List = { id: string; name: string };
 type Player = { id: string; name: string; rating: number };
 type Score = {
@@ -31,13 +32,19 @@ type Match = {
     scoringPreset: string;
     format?: string;
     progression?: { queue?: string[] };
+    teams?: Array<{ id: string; name: string; seed: number }>;
     matches?: Array<{
       id: string;
+      homeTeamId: string;
+      awayTeamId: string;
       round: number;
       group?: string | null;
       status: string;
-      homeTeam: { name: string };
-      awayTeam: { name: string };
+      winnerTeamId: string | null;
+      homeGames: number;
+      awayGames: number;
+      homeTeam: { id: string; name: string };
+      awayTeam: { id: string; name: string };
     }>;
   };
 };
@@ -346,6 +353,32 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       await navigator.clipboard.writeText(text);
       window.open(whatsappUrl(text), "_blank", "noopener");
       setNotice("Copied result and opened WhatsApp sharing.");
+    }
+  };
+  const shareSession = async () => {
+    if (!match?.session.matches) return;
+    const text = formatSessionShare({
+      session: active?.name ?? "Padel session",
+      format: match.session.format?.replaceAll("_", " ") ?? "Session",
+      fixtures: match.session.matches
+        .filter((item) => item.status === "CONFIRMED")
+        .map((item) => ({
+          home: item.homeTeam.name,
+          away: item.awayTeam.name,
+          score: `${item.homeGames}–${item.awayGames}`,
+          winner:
+            item.winnerTeamId === item.homeTeam.id
+              ? item.homeTeam.name
+              : item.winnerTeamId === item.awayTeam.id
+                ? item.awayTeam.name
+                : undefined,
+        })),
+    });
+    if (navigator.share)
+      await navigator.share({ title: "Padel session", text });
+    else {
+      await navigator.clipboard.writeText(text);
+      window.open(whatsappUrl(text), "_blank", "noopener");
     }
   };
   const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -831,11 +864,38 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                       </li>
                     ))}
                   </ul>
+                  <button
+                    className="btn btn-secondary mt-3"
+                    onClick={shareSession}
+                  >
+                    Share session
+                  </button>
                   {match.session.format === "ROUND_ROBIN" && (
-                    <p className="mb-0">
-                      Round-robin standings update after every confirmed result;
-                      use Stats for player form.
-                    </p>
+                    <table className="mt-3 w-full text-left">
+                      <thead>
+                        <tr>
+                          <th>Team</th>
+                          <th>P</th>
+                          <th>W</th>
+                          <th>+/-</th>
+                          <th>Games</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {roundRobinStandings(
+                          match.session.teams ?? [],
+                          match.session.matches,
+                        ).map((row) => (
+                          <tr key={row.id}>
+                            <td>{row.name}</td>
+                            <td>{row.played}</td>
+                            <td>{row.wins}</td>
+                            <td>{row.gameDiff}</td>
+                            <td>{row.gamesWon}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </section>
               )}

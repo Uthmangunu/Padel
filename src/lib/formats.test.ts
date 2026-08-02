@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { roundRobin, knockout, groups, winnerStaysNext } from "./formats";
+import {
+  roundRobin,
+  knockout,
+  groups,
+  winnerStaysNext,
+  roundRobinStandings,
+} from "./formats";
 const teams = [1, 2, 3, 4].map((seed) => ({ id: String(seed), seed }));
 describe("formats", () => {
   it("schedules every round robin pairing", () =>
@@ -22,4 +28,23 @@ describe("formats", () => {
     expect(() => groups(teams.slice(0, 3))).toThrow());
   it("moves loser to queue tail", () =>
     expect(winnerStaysNext(["a", "b", "c"], "a", "b")).toEqual(["c", "b"]));
+  it("orders tied teams by head-to-head before seed", () =>
+    expect(
+      roundRobinStandings(
+        [
+          { id: "a", name: "A", seed: 1 },
+          { id: "b", name: "B", seed: 2 },
+        ],
+        [
+          {
+            homeTeamId: "a",
+            awayTeamId: "b",
+            winnerTeamId: "b",
+            homeGames: 3,
+            awayGames: 3,
+            status: "CONFIRMED",
+          },
+        ],
+      ).map((row) => row.id),
+    ).toEqual(["b", "a"]));
 });

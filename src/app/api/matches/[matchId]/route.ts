@@ -14,6 +14,7 @@ export async function GET(
         events: { orderBy: { sequence: "asc" } },
         session: {
           include: {
+            teams: { orderBy: { seed: "asc" } },
             matches: {
               orderBy: { sequence: "asc" },
               include: { homeTeam: true, awayTeam: true },

@@ -10,3 +10,15 @@ export function formatMatchShare(input: {
 export function whatsappUrl(text: string) {
   return `https://wa.me/?text=${encodeURIComponent(text)}`;
 }
+export function formatSessionShare(input: {
+  session: string;
+  format: string;
+  fixtures: Array<{
+    home: string;
+    away: string;
+    score?: string;
+    winner?: string;
+  }>;
+}) {
+  return `🎾 ${input.session}\nFormat: ${input.format}\n\n${input.fixtures.map((fixture) => `${fixture.home} vs ${fixture.away}${fixture.score ? ` — ${fixture.score}` : ""}${fixture.winner ? ` (${fixture.winner})` : ""}`).join("\n")}\n\nTracked with Padel Manager`;
+}

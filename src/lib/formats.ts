@@ -7,6 +7,52 @@ export type Fixture = {
   bye?: boolean;
   group?: "A" | "B";
 };
+export type StandingTeam = { id: string; name: string; seed: number };
+export type StandingMatch = {
+  homeTeamId: string;
+  awayTeamId: string;
+  winnerTeamId: string | null;
+  homeGames: number;
+  awayGames: number;
+  status: string;
+};
+export function roundRobinStandings(
+  teams: StandingTeam[],
+  matches: StandingMatch[],
+) {
+  const rows = new Map(
+    teams.map((team) => [
+      team.id,
+      { ...team, played: 0, wins: 0, gameDiff: 0, gamesWon: 0 },
+    ]),
+  );
+  for (const match of matches.filter((match) => match.status === "CONFIRMED")) {
+    const home = rows.get(match.homeTeamId);
+    const away = rows.get(match.awayTeamId);
+    if (!home || !away) continue;
+    home.played++;
+    away.played++;
+    home.gameDiff += match.homeGames - match.awayGames;
+    away.gameDiff += match.awayGames - match.homeGames;
+    home.gamesWon += match.homeGames;
+    away.gamesWon += match.awayGames;
+    if (match.winnerTeamId) rows.get(match.winnerTeamId)!.wins++;
+  }
+  return [...rows.values()].sort((a, b) => {
+    const basic =
+      b.wins - a.wins || b.gameDiff - a.gameDiff || b.gamesWon - a.gamesWon;
+    if (basic) return basic;
+    const direct = matches.find(
+      (match) =>
+        match.status === "CONFIRMED" &&
+        ((match.homeTeamId === a.id && match.awayTeamId === b.id) ||
+          (match.homeTeamId === b.id && match.awayTeamId === a.id)),
+    );
+    if (direct?.winnerTeamId === a.id) return -1;
+    if (direct?.winnerTeamId === b.id) return 1;
+    return a.seed - b.seed;
+  });
+}
 export function roundRobin(teams: FormatTeam[], group?: "A" | "B"): Fixture[] {
   const out: Fixture[] = [];
   let sequence = 0;
