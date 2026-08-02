@@ -6,10 +6,13 @@ import {
   ArrowRight,
   BarChart3,
   CalendarDays,
+  CheckCircle2,
   CircleGauge,
   History,
   Info,
   ListPlus,
+  LoaderCircle,
+  Medal,
   Pencil,
   ShieldAlert,
   Shuffle,
@@ -26,16 +29,17 @@ import {
 } from "@/lib/teams";
 import { formatMatchShare, formatSessionShare, whatsappUrl } from "@/lib/share";
 import { roundRobinStandings } from "@/lib/formats";
+import {
+  initialScore,
+  reduceScore,
+  type GameRule as ScoringGameRule,
+  type MatchScore,
+  type Preset as ScoringPreset,
+  type ScoreEvent,
+} from "@/lib/scoring";
 type List = { id: string; name: string };
 type Player = { id: string; name: string; rating: number };
-type Score = {
-  points: [number, number];
-  games: [number, number];
-  sets: [number, number];
-  totalGames: [number, number];
-  winner?: number;
-  tiebreak: [number, number] | null;
-};
+type Score = MatchScore;
 type Match = {
   id: string;
   status: string;
@@ -114,7 +118,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [tab, setTab] = useState<
-    "roster" | "teams" | "score" | "history" | "stats"
+    "roster" | "teams" | "score" | "history" | "league" | "stats"
   >("roster");
   const [teams, setTeams] = useState<ReturnType<
     typeof buildBalancedTeams
@@ -163,6 +167,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   const [to, setTo] = useState("");
   const [notice, setNotice] = useState("");
   const [seconds, setSeconds] = useState(0);
+  const [scoreSaveState, setScoreSaveState] = useState<
+    "idle" | "saving" | "saved"
+  >("idle");
   const active = useMemo(
     () => lists.find((list) => list.id === listId),
     [listId, lists],
@@ -174,6 +181,17 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           historyFilter === "ALL" || session.status === historyFilter,
       ),
     [historyFilter, recentSessions],
+  );
+  const leagueTable = useMemo(
+    () =>
+      [...(stats?.players ?? [])].sort(
+        (a, b) =>
+          b.wins - a.wins ||
+          b.gamesDifferential - a.gamesDifferential ||
+          b.winRate - a.winRate ||
+          a.name.localeCompare(b.name),
+      ),
+    [stats],
   );
   const roster = players.filter((player) => selected.includes(player.id));
   useEffect(() => {
@@ -254,7 +272,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   };
   const addPlayer = async () => {
     const name = prompt("Player name");
-    const rating = Number(prompt("Rating (1.0–10.0)", "7.0"));
+    const rating = Number(prompt("Rating (1.0–10.0)", "6.0"));
     if (!name) return;
     try {
       await call(`/api/lists/${listId}/players`, {
@@ -276,6 +294,22 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         body: JSON.stringify({ name, rating }),
       });
       loadPlayers();
+    } catch (error) {
+      setNotice((error as Error).message);
+    }
+  };
+  const editRating = async (player: Player) => {
+    const rating = Number(
+      prompt(`${player.name}'s rating (1.0–10.0)`, player.rating.toFixed(1)),
+    );
+    if (!Number.isFinite(rating)) return;
+    try {
+      await call(`/api/players/${player.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: player.name, rating }),
+      });
+      loadPlayers();
+      setNotice(`${player.name}'s rating is now ${rating.toFixed(1)}.`);
     } catch (error) {
       setNotice((error as Error).message);
     }
@@ -351,6 +385,44 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       setNotice((error as Error).message);
     }
   };
+  const startQuickKickoff = async () => {
+    if (roster.length !== 4) {
+      setNotice("Quick Kickoff needs exactly four selected players.");
+      return;
+    }
+    try {
+      const quickTeams = buildBalancedTeams(roster);
+      const session = await call<{ matches: Array<{ id: string }> }>(
+        "/api/sessions",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            listId,
+            name: `Quick kickoff · ${new Intl.DateTimeFormat(undefined, {
+              dateStyle: "medium",
+            }).format(new Date())}`,
+            format: "ROUND_ROBIN",
+            gameRule: "GOLDEN_POINT",
+            inputMode: "GAMES",
+            scoringPreset: "RACE_TO_3",
+            playerIds: selected,
+            teams: quickTeams.teams.map((team) => [
+              team.members[0].id,
+              team.members[1].id,
+            ]),
+            benchedIds: [],
+          }),
+        },
+      );
+      setNotice("Quick Kickoff is live. Every game is saved automatically.");
+      if (session.matches[0]) await openMatch(session.matches[0].id);
+      void call<SavedSession[]>(`/api/sessions?listId=${listId}`).then(
+        setRecentSessions,
+      );
+    } catch (error) {
+      setNotice((error as Error).message);
+    }
+  };
   const openMatch = async (id: string) => {
     try {
       setMatch(await call<Match>(`/api/matches/${id}`));
@@ -369,13 +441,40 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       | "CONFIRM",
     winner?: 0 | 1,
   ) => {
-    if (!match) return;
-    try {
-      const updated = await call<Match>(`/api/matches/${match.id}/score`, {
-        method: "POST",
-        body: JSON.stringify({ revision: match.revision, action, winner }),
+    if (!match || scoreSaveState === "saving") return;
+    const before = match;
+    setScoreSaveState("saving");
+    if (action !== "UNDO" && action !== "CONFIRM" && winner !== undefined) {
+      const optimistic = reduceScore(
+        match.score ?? initialScore(),
+        { type: action as ScoreEvent["type"], winner },
+        match.session.scoringPreset as ScoringPreset,
+        match.session.gameRule as ScoringGameRule,
+      );
+      setMatch({
+        ...match,
+        score: optimistic,
+        status:
+          optimistic.winner === undefined ? "LIVE" : "AWAITING_CONFIRMATION",
       });
-      setMatch((value) => (value ? { ...value, ...updated } : updated));
+    }
+    try {
+      const updated = await call<Match>(`/api/matches/${before.id}/score`, {
+        method: "POST",
+        body: JSON.stringify({ revision: before.revision, action, winner }),
+      });
+      setMatch({ ...before, ...updated });
+      setScoreSaveState("saved");
+      window.setTimeout(() => setScoreSaveState("idle"), 1200);
+      if (action !== "CONFIRM" && updated.score?.winner !== undefined) {
+        const winnerName =
+          updated.score.winner === 0
+            ? before.homeTeam.name
+            : before.awayTeam.name;
+        setNotice(
+          `${winnerName} wins ${updated.score.totalGames[0]}–${updated.score.totalGames[1]}. Result saved — confirm it to finish.`,
+        );
+      }
       if (action === "CONFIRM") {
         const sessions = await call<
           Array<{ matches: Array<{ id: string; status: string }> }>
@@ -385,7 +484,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           .find((item) => item.status === "LIVE");
         if (next) await openMatch(next.id);
         else {
-          await openMatch(match.id);
+          await openMatch(before.id);
           setNotice(
             "Session complete — final standings and sharing remain available.",
           );
@@ -395,6 +494,8 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         );
       }
     } catch (error) {
+      setMatch(before);
+      setScoreSaveState("idle");
       setNotice((error as Error).message);
     }
   };
@@ -664,6 +765,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             ["teams", Shuffle, "Team chaos"],
             ["score", Trophy, "Score it"],
             ["history", History, "History"],
+            ["league", Medal, "League"],
             ["stats", BarChart3, "Receipts"],
           ] as const
         ).map(([item, Icon, label]) => (
@@ -674,7 +776,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             data-active={tab === item}
             onClick={() => {
               setTab(item);
-              if (item === "stats") loadStats();
+              if (item === "stats" || item === "league") loadStats();
             }}
           >
             <Icon size={19} /> <span>{label}</span>
@@ -697,38 +799,37 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                 the group chat.
               </p>
             </div>
-            <button className="btn" onClick={addPlayer}>
-              <UserPlus size={18} /> Add player
-            </button>
-          </div>
-          <div className="date-filters grid-2 grid">
-            <label>
-              From
-              <input
-                className="field"
-                type="date"
-                value={from}
-                onChange={(event) => setFrom(event.target.value)}
-              />
-            </label>
-            <label>
-              To
-              <input
-                className="field"
-                type="date"
-                value={to}
-                onChange={(event) => setTo(event.target.value)}
-              />
-            </label>
+            <div className="roster-actions">
+              <button
+                className="btn btn-coral"
+                disabled={selected.length !== 4}
+                onClick={startQuickKickoff}
+              >
+                <Zap size={18} /> Quick Kickoff · pick 4
+              </button>
+              <button className="btn" onClick={addPlayer}>
+                <UserPlus size={18} /> Add player
+              </button>
+            </div>
           </div>
           {selected.length > 0 && (
             <div className="selection-strip">
               <span>
                 <b>{selected.length} picked.</b> Enough talent? We&apos;ll see.
               </span>
-              <button className="btn btn-lime" onClick={() => setTab("teams")}>
-                Make the teams <Shuffle size={17} />
-              </button>
+              <div className="selection-actions">
+                {selected.length === 4 && (
+                  <button className="btn btn-coral" onClick={startQuickKickoff}>
+                    Kick off now <Zap size={17} />
+                  </button>
+                )}
+                <button
+                  className="btn btn-lime"
+                  onClick={() => setTab("teams")}
+                >
+                  Make the teams <Shuffle size={17} />
+                </button>
+              </div>
             </div>
           )}
           <div className="player-grid">
@@ -757,13 +858,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   </span>
                   <span className="player-name">
                     <b>{player.name}</b>
-                    <small>
-                      {player.rating >= 8
-                        ? "Court menace"
-                        : player.rating >= 6
-                          ? "Solid operator"
-                          : "Wildcard energy"}
-                    </small>
+                    <small>Player rating</small>
                   </span>
                 </label>
                 <span className="player-actions">
@@ -771,7 +866,14 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                     <CircleGauge size={15} /> {player.rating.toFixed(1)}
                   </span>
                   <button
-                    aria-label={`Edit ${player.name}`}
+                    className="rating-edit"
+                    aria-label={`Edit rating for ${player.name}`}
+                    onClick={() => editRating(player)}
+                  >
+                    Edit rating
+                  </button>
+                  <button
+                    aria-label={`Edit name for ${player.name}`}
                     onClick={() => editPlayer(player)}
                   >
                     <Pencil size={16} />
@@ -1053,6 +1155,19 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                 <span className="pill">
                   {match.status.replaceAll("_", " ")}
                 </span>
+                <span className="score-sync" role="status">
+                  {scoreSaveState === "saving" ? (
+                    <>
+                      <LoaderCircle className="spin" size={16} /> Saving…
+                    </>
+                  ) : scoreSaveState === "saved" ? (
+                    <>
+                      <CheckCircle2 size={16} /> Saved
+                    </>
+                  ) : (
+                    "Every tap saves"
+                  )}
+                </span>
                 <b aria-label="Match clock">{clock}</b>
               </div>
               <div className="score-teams grid-2 my-7 grid text-center">
@@ -1087,65 +1202,92 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   </p>
                 </div>
               </div>
-              <div className="score-actions grid-2 grid">
-                <button
-                  className="btn min-h-20"
-                  onClick={() =>
-                    score(
-                      match.score?.tiebreak
-                        ? match.session.inputMode === "GAMES"
-                          ? "TIEBREAK_WINNER"
-                          : "TIEBREAK_GAME"
-                        : match.session.inputMode === "POINTS"
-                          ? "POINT"
-                          : "TEAM_GAME",
-                      0,
-                    )
-                  }
-                >
-                  {match.homeTeam.name} wins{" "}
-                  {match.score?.tiebreak
-                    ? match.session.inputMode === "GAMES"
-                      ? "tiebreak"
-                      : "tiebreak point"
-                    : match.session.inputMode === "POINTS"
-                      ? "point"
-                      : "game"}
-                </button>
-                <button
-                  className="btn min-h-20"
-                  onClick={() =>
-                    score(
-                      match.score?.tiebreak
-                        ? match.session.inputMode === "GAMES"
-                          ? "TIEBREAK_WINNER"
-                          : "TIEBREAK_GAME"
-                        : match.session.inputMode === "POINTS"
-                          ? "POINT"
-                          : "TEAM_GAME",
-                      1,
-                    )
-                  }
-                >
-                  {match.awayTeam.name} wins{" "}
-                  {match.score?.tiebreak
-                    ? match.session.inputMode === "GAMES"
-                      ? "tiebreak"
-                      : "tiebreak point"
-                    : match.session.inputMode === "POINTS"
-                      ? "point"
-                      : "game"}
-                </button>
-              </div>
+              {match.score?.winner !== undefined && (
+                <div className="victory-banner" role="status">
+                  <Trophy size={38} />
+                  <span>
+                    <b>
+                      {match.score.winner === 0
+                        ? match.homeTeam.name
+                        : match.awayTeam.name}{" "}
+                      wins {match.score.totalGames[0]}–
+                      {match.score.totalGames[1]}!
+                    </b>
+                    <small>
+                      The match has stopped and the result is saved. Confirm it
+                      to lock the result and continue.
+                    </small>
+                  </span>
+                </div>
+              )}
+              {match.status === "LIVE" && (
+                <div className="score-actions grid-2 grid">
+                  <button
+                    className="btn min-h-20"
+                    disabled={scoreSaveState === "saving"}
+                    onClick={() =>
+                      score(
+                        match.score?.tiebreak
+                          ? match.session.inputMode === "GAMES"
+                            ? "TIEBREAK_WINNER"
+                            : "TIEBREAK_GAME"
+                          : match.session.inputMode === "POINTS"
+                            ? "POINT"
+                            : "TEAM_GAME",
+                        0,
+                      )
+                    }
+                  >
+                    {match.homeTeam.name} wins{" "}
+                    {match.score?.tiebreak
+                      ? match.session.inputMode === "GAMES"
+                        ? "tiebreak"
+                        : "tiebreak point"
+                      : match.session.inputMode === "POINTS"
+                        ? "point"
+                        : "game"}
+                  </button>
+                  <button
+                    className="btn min-h-20"
+                    disabled={scoreSaveState === "saving"}
+                    onClick={() =>
+                      score(
+                        match.score?.tiebreak
+                          ? match.session.inputMode === "GAMES"
+                            ? "TIEBREAK_WINNER"
+                            : "TIEBREAK_GAME"
+                          : match.session.inputMode === "POINTS"
+                            ? "POINT"
+                            : "TEAM_GAME",
+                        1,
+                      )
+                    }
+                  >
+                    {match.awayTeam.name} wins{" "}
+                    {match.score?.tiebreak
+                      ? match.session.inputMode === "GAMES"
+                        ? "tiebreak"
+                        : "tiebreak point"
+                      : match.session.inputMode === "POINTS"
+                        ? "point"
+                        : "game"}
+                  </button>
+                </div>
+              )}
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   className="btn btn-secondary"
+                  disabled={scoreSaveState === "saving"}
                   onClick={() => score("UNDO")}
                 >
                   Undo
                 </button>
                 {match.status === "AWAITING_CONFIRMATION" && (
-                  <button className="btn" onClick={() => score("CONFIRM")}>
+                  <button
+                    className="btn btn-coral"
+                    disabled={scoreSaveState === "saving"}
+                    onClick={() => score("CONFIRM")}
+                  >
                     Confirm result
                   </button>
                 )}
@@ -1360,6 +1502,96 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           )}
         </section>
       )}
+      {tab === "league" && (
+        <section className="card league-section">
+          <div className="section-heading">
+            <div>
+              <span className="kicker">THE CLUB TABLE</span>
+              <h2>League standings</h2>
+              <p>
+                Confirmed matches from this list become league points
+                automatically. Wins lead, then games difference and win rate.
+              </p>
+            </div>
+            <button className="btn btn-secondary" onClick={loadStats}>
+              <Medal size={18} /> Refresh table
+            </button>
+          </div>
+          <div className="league-filters grid-2 grid">
+            <label>
+              From
+              <input
+                className="field"
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+              />
+            </label>
+            <label>
+              To
+              <input
+                className="field"
+                type="date"
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+              />
+            </label>
+          </div>
+          {leagueTable.length === 0 ? (
+            <div className="league-empty">
+              <Medal size={46} />
+              <h3>No league results yet.</h3>
+              <p>Confirm a match and the first table will appear here.</p>
+            </div>
+          ) : (
+            <div className="league-table-wrap">
+              <table className="league-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Player</th>
+                    <th>Played</th>
+                    <th>Won</th>
+                    <th>Lost</th>
+                    <th>Games +/-</th>
+                    <th>Win rate</th>
+                    <th>Form</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leagueTable.map((player, index) => (
+                    <tr key={player.id}>
+                      <td>
+                        <span className="league-rank">{index + 1}</span>
+                      </td>
+                      <td>
+                        <b>{player.name}</b>
+                      </td>
+                      <td>{player.wins + player.losses}</td>
+                      <td>{player.wins}</td>
+                      <td>{player.losses}</td>
+                      <td>
+                        {player.gamesDifferential > 0 ? "+" : ""}
+                        {player.gamesDifferential}
+                      </td>
+                      <td>{(player.winRate * 100).toFixed(0)}%</td>
+                      <td>
+                        <span className="form-dots">
+                          {player.rolling10.slice(-5).map((won, formIndex) => (
+                            <i key={formIndex} data-win={won}>
+                              {won ? "W" : "L"}
+                            </i>
+                          ))}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
       {tab === "stats" && (
         <section className="card stats-section">
           <div className="section-heading">
@@ -1374,6 +1606,26 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             <button className="btn btn-secondary" onClick={loadStats}>
               <BarChart3 size={18} /> Refresh
             </button>
+          </div>
+          <div className="league-filters grid-2 grid">
+            <label>
+              From
+              <input
+                className="field"
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+              />
+            </label>
+            <label>
+              To
+              <input
+                className="field"
+                type="date"
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+              />
+            </label>
           </div>
           {!stats ? (
             <p>Load the dashboard to see confirmed history.</p>

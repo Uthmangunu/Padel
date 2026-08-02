@@ -9,6 +9,9 @@ test("introduces the app before opening the roster", async ({ page }) => {
     await page.getByRole("button", { name: "Show me" }).click();
   await page.getByRole("button", { name: "Let's play" }).click();
   await expect(page.getByText("Your court, organised.")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Edit rating for Youssef" }),
+  ).toBeVisible();
 });
 
 test("runs a persistent race-to-three session and exposes stats", async ({
@@ -56,6 +59,8 @@ test("runs a persistent race-to-three session and exposes stats", async ({
   await expect(
     page.getByText(/LIVE|AWAITING CONFIRMATION/i).first(),
   ).toBeVisible();
+  await expect(page.getByText(/wins 3–0!/i)).toBeVisible();
+  await expect(page.getByText(/result is saved/i)).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Confirm result" }),
   ).toBeVisible();
@@ -96,5 +101,23 @@ test("runs a persistent race-to-three session and exposes stats", async ({
       .locator("..")
       .getByText(/\d+–\d+|\d+-\d+/)
       .first(),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "league", exact: true }).click();
+  await expect(page.getByText("League standings")).toBeVisible();
+  await expect(page.getByRole("table").getByText("Youssef")).toBeVisible();
+});
+
+test("starts a saved quick kickoff with four players", async ({ page }) => {
+  await page.addInitScript(() =>
+    window.localStorage.setItem("padel-onboarding-v1", "done"),
+  );
+  await page.goto("/");
+  for (const name of ["Youssef", "Saif", "Uthman", "Todimu"]) {
+    await page.getByRole("checkbox", { name, exact: true }).check();
+  }
+  await page.getByRole("button", { name: /Kick off now/i }).click();
+  await expect(page.getByText("Every tap saves")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /wins game/i }).first(),
   ).toBeVisible();
 });

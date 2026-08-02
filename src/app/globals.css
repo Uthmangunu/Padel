@@ -223,7 +223,7 @@ select:focus-visible {
 }
 .app-nav {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 10px;
   margin: 18px 0 28px;
   padding: 8px;
@@ -310,6 +310,12 @@ select:focus-visible {
   transform: translate(2px, 2px);
   box-shadow: 1px 1px 0 #101b3f;
 }
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
+  box-shadow: 2px 2px 0 #101b3f;
+}
 .btn-secondary {
   background: #eeeaff;
   color: #101b3f;
@@ -388,6 +394,13 @@ select:focus-visible {
   border-radius: 16px;
   background: #101b3f;
   color: white;
+}
+.roster-actions,
+.selection-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .player-grid {
   display: grid;
@@ -493,6 +506,14 @@ select:focus-visible {
 .player-actions button + button {
   margin-left: 0;
   font-size: 1.2rem;
+}
+.player-actions .rating-edit {
+  width: auto;
+  padding: 0 9px;
+  white-space: nowrap;
+  color: #1647d8;
+  font-size: 0.7rem;
+  font-weight: 950;
 }
 .rating {
   display: inline-flex;
@@ -661,6 +682,52 @@ select:focus-visible {
 .scoreboard table td {
   padding: 7px;
   border-bottom: 1px solid #ccd0db;
+}
+.score-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  padding: 6px 9px;
+  color: #dbe4ff;
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.victory-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: -8px 0 18px;
+  border: 3px solid #101b3f;
+  border-radius: 18px;
+  background: #ff654f;
+  color: white;
+  padding: 16px;
+  box-shadow: 5px 5px 0 #d8f532;
+}
+.victory-banner > svg {
+  flex: 0 0 auto;
+}
+.victory-banner b,
+.victory-banner small {
+  display: block;
+}
+.victory-banner b {
+  font-size: 1.25rem;
+  font-weight: 1000;
+}
+.victory-banner small {
+  margin-top: 4px;
+  line-height: 1.4;
 }
 
 .coverage-card {
@@ -963,6 +1030,104 @@ select:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
+}
+
+.league-filters {
+  max-width: 560px;
+  margin: 0 0 18px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #f5f3ff;
+}
+.league-filters label {
+  color: #4d5571;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+.league-empty {
+  min-height: 290px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border: 2px dashed #b9bfd4;
+  border-radius: 20px;
+  background: linear-gradient(145deg, #f6ffd1, #faf9ff);
+}
+.league-empty svg {
+  color: #1647d8;
+}
+.league-empty h3 {
+  margin: 13px 0 4px;
+  font-size: 1.45rem;
+}
+.league-empty p {
+  margin: 0;
+  color: #6c7288;
+}
+.league-table-wrap {
+  overflow-x: auto;
+  border: 2px solid #101b3f;
+  border-radius: 18px;
+}
+.league-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  text-align: left;
+}
+.league-table th {
+  background: #101b3f;
+  color: white;
+  padding: 12px;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.league-table td {
+  padding: 12px;
+  border-bottom: 1px solid #dfe2ed;
+}
+.league-table tbody tr:nth-child(odd) {
+  background: #faf9ff;
+}
+.league-table tbody tr:first-child {
+  background: #f6ffd1;
+}
+.league-rank {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 2px solid #101b3f;
+  border-radius: 50%;
+  background: white;
+  font-size: 0.78rem;
+  font-weight: 1000;
+}
+.league-table tbody tr:first-child .league-rank {
+  background: #d8f532;
+}
+.form-dots {
+  display: flex;
+  gap: 4px;
+}
+.form-dots i {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border-radius: 6px;
+  background: #ffd8d2;
+  color: #8e3028;
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 1000;
+}
+.form-dots i[data-win="true"] {
+  background: #d8f532;
+  color: #344800;
 }
 
 @media (min-width: 760px) {
