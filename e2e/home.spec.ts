@@ -1,0 +1,1 @@
+import { test,expect } from "@playwright/test";test("shows the mobile-first roster experience",async({page})=>{await page.goto("/");await expect(page.getByText("Your court, organised.")).toBeVisible();});
