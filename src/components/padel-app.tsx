@@ -484,7 +484,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           </p>
           <div className="hero-chips">
             <span>
-              <UsersRound size={17} /> {players.length || 16} players
+              <UsersRound size={17} /> Roster grows with you
             </span>
             <span>
               <Zap size={17} /> {selected.length} ready to cook
@@ -588,6 +588,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                 <label className="player-main">
                   <input
                     type="checkbox"
+                    aria-label={player.name}
                     checked={selected.includes(player.id)}
                     onChange={() =>
                       setSelected((ids) =>

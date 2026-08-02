@@ -10,13 +10,9 @@ test("runs a persistent race-to-three session and exposes stats", async ({
 }) => {
   await page.goto("/");
   for (const name of ["Youssef", "Saif", "Uthman", "Todimu"]) {
-    await page
-      .getByText(name, { exact: true })
-      .locator("..")
-      .getByRole("checkbox")
-      .check();
+    await page.getByRole("checkbox", { name, exact: true }).check();
   }
-  await page.getByRole("button", { name: "teams" }).click();
+  await page.getByRole("button", { name: "teams", exact: true }).click();
   await page.getByLabel("Preset").selectOption("RACE_TO_3");
   await page.getByLabel("Input").selectOption("GAMES");
   await page.getByRole("button", { name: "Auto-balance" }).click();
@@ -66,7 +62,7 @@ test("runs a persistent race-to-three session and exposes stats", async ({
       .first(),
   ).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "score" }).click();
+  await page.getByRole("button", { name: "score", exact: true }).click();
   await expect(page.getByText("Recent sessions")).toBeVisible();
   await page
     .getByText(/Friday Padel session/i)
@@ -75,7 +71,7 @@ test("runs a persistent race-to-three session and exposes stats", async ({
   await expect(
     page.getByRole("button", { name: "Share session" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "stats" }).click();
+  await page.getByRole("button", { name: "stats", exact: true }).click();
   await expect(page.getByText("Player statistics")).toBeVisible();
   await expect(
     page
