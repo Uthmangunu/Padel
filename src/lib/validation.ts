@@ -12,6 +12,7 @@ export const sessionSchema = z.object({
     "KNOCKOUT",
     "ROUND_ROBIN",
     "GROUPS_KNOCKOUT",
+    "LEAGUE",
   ]),
   gameRule: z.enum(["ADVANTAGE", "GOLDEN_POINT"]),
   inputMode: z.enum(["POINTS", "GAMES"]),
@@ -28,6 +29,26 @@ export const sessionSchema = z.object({
       }),
     )
     .optional(),
+});
+export const clearHistorySchema = z.object({
+  confirmation: z.literal("CLEAR HISTORY"),
+});
+export const importHistorySchema = z.object({
+  rows: z
+    .array(
+      z.object({
+        date: z.string().datetime(),
+        matchType: z.enum(["CASUAL", "LEAGUE"]),
+        homePlayer1: z.string().trim().min(1).max(80),
+        homePlayer2: z.string().trim().min(1).max(80),
+        awayPlayer1: z.string().trim().min(1).max(80),
+        awayPlayer2: z.string().trim().min(1).max(80),
+        homeGames: z.number().int().min(0),
+        awayGames: z.number().int().min(0),
+      }),
+    )
+    .min(1)
+    .max(500),
 });
 export const scoreActionSchema = z.object({
   revision: z.number().int().nonnegative(),

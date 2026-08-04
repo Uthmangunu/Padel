@@ -28,9 +28,15 @@ export async function GET(req: Request) {
       return Response.json({ error: "listId required" }, { status: 400 });
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
+    const format = url.searchParams.get("format");
+    if (format && format !== "LEAGUE")
+      return Response.json(
+        { error: "Unsupported statistics format" },
+        { status: 400 },
+      );
     const matches = await prisma.match.findMany({
       where: {
-        session: { listId },
+        session: { listId, ...(format ? { format: "LEAGUE" as const } : {}) },
         status: "CONFIRMED",
         ...(from || to
           ? {

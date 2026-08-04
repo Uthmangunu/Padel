@@ -28,6 +28,8 @@ export async function POST(
         );
       if (current.status === "CONFIRMED")
         throw new AppError(400, "Confirmed results cannot be changed");
+      if (current.status === "CANCELLED")
+        throw new AppError(400, "Stopped sessions cannot be scored");
       const events: ScoreEvent[] = current.events.map((event) => ({
         type: event.type,
         ...(event.winner === null ? {} : { winner: event.winner as 0 | 1 }),

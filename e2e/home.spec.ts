@@ -25,6 +25,7 @@ test("runs a persistent race-to-three session and exposes stats", async ({
     await page.getByRole("checkbox", { name, exact: true }).check();
   }
   await page.getByRole("button", { name: "teams", exact: true }).click();
+  await page.getByLabel("Format").selectOption("LEAGUE");
   await page.getByLabel("Preset").selectOption("RACE_TO_3");
   await page.getByLabel("Input").selectOption("GAMES");
   await page.getByRole("button", { name: "Auto-balance" }).click();
@@ -65,7 +66,7 @@ test("runs a persistent race-to-three session and exposes stats", async ({
     page.getByRole("button", { name: "Confirm result" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Confirm result" }).click();
-  await expect(page.getByText("ROUND ROBIN progress")).toBeVisible();
+  await expect(page.getByText("LEAGUE progress")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Share session" }),
   ).toBeVisible();
@@ -105,6 +106,23 @@ test("runs a persistent race-to-three session and exposes stats", async ({
   await page.getByRole("button", { name: "league", exact: true }).click();
   await expect(page.getByText("League standings")).toBeVisible();
   await expect(page.getByRole("table").getByText("Youssef")).toBeVisible();
+});
+
+test("stops a live session and retains cancelled history", async ({ page }) => {
+  await page.addInitScript(() =>
+    window.localStorage.setItem("padel-onboarding-v1", "done"),
+  );
+  await page.goto("/");
+  for (const name of ["Youssef", "Saif", "Uthman", "Todimu"]) {
+    await page.getByRole("checkbox", { name, exact: true }).check();
+  }
+  await page.getByRole("button", { name: "teams", exact: true }).click();
+  await page.getByRole("button", { name: "Auto-balance" }).click();
+  await page.getByRole("button", { name: "Start session" }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Stop live scoring" }).click();
+  await expect(page.getByText(/partial session is saved as cancelled/i)).toBeVisible();
+  await expect(page.getByText("cancelled").first()).toBeVisible();
 });
 
 test("starts a saved quick kickoff with four players", async ({ page }) => {
