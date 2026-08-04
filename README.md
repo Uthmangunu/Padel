@@ -23,9 +23,11 @@ Open [http://localhost:3000](http://localhost:3000). The idempotent seed creates
 - Snapshot-based sessions with fixed two-person teams and explicit benching for an odd roster.
 - A testable team balancer, forced/blocked pair constraints, and support for lineup exclusion during reshuffles.
 - Persistent, append-only score events; advantage or golden-point games; race-to-3, race-to-6, and standard best-of-3; undo until result confirmation.
-- Round robin, knockout, winner-stays-on and group-to-knockout session progression. One live court is atomically activated at a time.
+- Round robin, knockout, winner-stays-on, group-to-knockout, and official League session progression. One live court is atomically activated at a time.
 - Per-player expected-performance, W/L, streak, partner, head-to-head and coverage-aware clutch data. Clutch data is deliberately only shown from point-by-point matches.
-- Formatted text sharing, clipboard/native sharing compatible output, and WhatsApp fallback URLs.
+- A League table sourced only from confirmed League fixtures; casual sessions and Quick Kickoff never affect it.
+- Completed-game CSV import, safe history deletion, and retained cancelled sessions. Stopped sessions never affect statistics or League standings.
+- Formatted text sharing, clipboard/native sharing compatible output, and WhatsApp fallback URLs for completed sessions only.
 
 ## Architecture
 
@@ -33,14 +35,26 @@ Next.js App Router provides server-rendered initial data and explicit REST route
 
 The app is public-write by design: anyone who can reach the deployment can alter content. A future optional `ADMIN_WRITE_KEY` middleware can protect writes without adding a complete identity system.
 
+## League, history, and sharing
+
+Choose **League (official standings)** when building teams to create a round-robin League session. Only confirmed fixtures from that format count in the League tab. Other match types still appear in History and general player statistics.
+
+Use **Stop live scoring** to preserve an in-progress session as Cancelled history. It cannot be resumed and never contributes to statistics. Completed and cancelled sessions can be deleted individually; **Clear history** removes only completed/cancelled sessions after typing `CLEAR HISTORY`, never an active session.
+
+Sharing is intentionally available only for completed sessions. It creates a native-share/clipboard/WhatsApp message rather than a public web link, so a message that has already been sent cannot be revoked.
+
+## Import past games
+
+Download the CSV template from History, fill one row per completed fixture, preview it, then import. The required columns are `date`, `match_type`, `home_player_1`, `home_player_2`, `away_player_1`, `away_player_2`, `home_games`, and `away_games`. `match_type` is `CASUAL` or `LEAGUE`; missing players are created at 6.0. See [the import guide](docs/import-history.md) for an example and validation rules.
+
 ## Deploy
 
 Create a Neon PostgreSQL database and set its pooled connection as `DATABASE_URL` and direct connection as `DIRECT_URL` in Vercel, then run `npx prisma migrate deploy` and `npm run db:seed` once against that database. Vercel detects Next.js and deploys pull-request previews automatically when connected to GitHub. Production should track `main`; work belongs on `feat/*`, `fix/*`, `chore/*`, `test/*`, or `docs/*` branches.
 
 ## Deliberately out of scope
 
-Authentication, realtime synchronization, multiple concurrent courts, player side tracking, automatic rating changes, Americano, Mexicano, reset controls, and fabricated demo match history.
+Authentication, realtime synchronization, multiple concurrent courts, player side tracking, automatic rating changes, Americano, Mexicano, and fabricated demo match history.
 
 ## Decisions
 
-See [ADRs](docs/adr) for event-based scoring, historical snapshots, format state machines, and statistics coverage.
+See [ADRs](docs/adr) for event-based scoring, historical snapshots, format state machines, statistics coverage, League eligibility, and history lifecycle rules.
