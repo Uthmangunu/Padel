@@ -12,18 +12,21 @@ enum SessionStatus {
   SETUP
   ACTIVE
   COMPLETE
+  CANCELLED
 }
 enum SessionFormat {
   WINNER_STAYS
   KNOCKOUT
   ROUND_ROBIN
   GROUPS_KNOCKOUT
+  LEAGUE
 }
 enum MatchStatus {
   PENDING
   LIVE
   AWAITING_CONFIRMATION
   CONFIRMED
+  CANCELLED
 }
 enum InputMode {
   POINTS

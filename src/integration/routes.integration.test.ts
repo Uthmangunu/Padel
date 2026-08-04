@@ -5,6 +5,10 @@ import { POST as createPlayer } from "@/app/api/lists/[listId]/players/route";
 import { DELETE as archivePlayer } from "@/app/api/players/[playerId]/route";
 import { POST as createSession } from "@/app/api/sessions/route";
 import { POST as scoreMatch } from "@/app/api/matches/[matchId]/score/route";
+import { POST as cancelSession } from "@/app/api/sessions/[sessionId]/cancel/route";
+import { DELETE as deleteSession } from "@/app/api/sessions/[sessionId]/route";
+import { POST as importHistory } from "@/app/api/lists/[listId]/history/import/route";
+import { DELETE as clearHistory } from "@/app/api/lists/[listId]/history/route";
 
 const enabled = Boolean(process.env.DATABASE_URL?.includes("postgres"));
 const suffix = `integration-${Date.now()}`;
@@ -65,6 +69,7 @@ describe.skipIf(!enabled)("route persistence", () => {
     );
     expect(sessionResponse.status).toBe(201);
     const session = (await sessionResponse.json()) as {
+      id: string;
       matches: Array<{ id: string; revision: number }>;
     };
     const match = session.matches[0];
@@ -98,6 +103,70 @@ describe.skipIf(!enabled)("route persistence", () => {
         )
       ).status,
     ).toBe(409);
+    expect(
+      (
+        await cancelSession(new Request("http://test", { method: "POST" }), {
+          params: Promise.resolve({ sessionId: session.id }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await scoreMatch(
+          new Request("http://test", {
+            method: "POST",
+            body: JSON.stringify({
+              revision: 1,
+              action: "TEAM_GAME",
+              winner: 0,
+            }),
+          }),
+          { params: Promise.resolve({ matchId: match.id }) },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await deleteSession(new Request("http://test", { method: "DELETE" }), {
+          params: Promise.resolve({ sessionId: session.id }),
+        })
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await importHistory(
+          new Request("http://test", {
+            method: "POST",
+            body: JSON.stringify({
+              rows: [
+                {
+                  date: "2026-08-04T12:00:00.000Z",
+                  matchType: "LEAGUE",
+                  homePlayer1: `${suffix}-A`,
+                  homePlayer2: `${suffix}-B`,
+                  awayPlayer1: `${suffix}-C`,
+                  awayPlayer2: `${suffix}-New`,
+                  homeGames: 3,
+                  awayGames: 1,
+                },
+              ],
+            }),
+          }),
+          params(list.id),
+        )
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await clearHistory(
+          new Request("http://test", {
+            method: "DELETE",
+            body: JSON.stringify({ confirmation: "CLEAR HISTORY" }),
+          }),
+          params(list.id),
+        )
+      ).status,
+    ).toBe(200);
   });
 });
 afterAll(async () => {

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowLeft,
@@ -18,6 +18,8 @@ import {
   Shuffle,
   Sparkles,
   Trophy,
+  Trash2,
+  Upload,
   UserPlus,
   UsersRound,
   Zap,
@@ -50,6 +52,8 @@ type Match = {
   homeTeam: { name: string };
   awayTeam: { name: string };
   session: {
+    id: string;
+    status: string;
     gameRule: string;
     inputMode: string;
     scoringPreset: string;
@@ -71,11 +75,12 @@ type Match = {
     }>;
   };
 };
-type Format = "WINNER_STAYS" | "KNOCKOUT" | "ROUND_ROBIN" | "GROUPS_KNOCKOUT";
+type Format =
+  "WINNER_STAYS" | "KNOCKOUT" | "ROUND_ROBIN" | "GROUPS_KNOCKOUT" | "LEAGUE";
 type SavedSession = {
   id: string;
   name: string;
-  status: "SETUP" | "ACTIVE" | "COMPLETE";
+  status: "SETUP" | "ACTIVE" | "COMPLETE" | "CANCELLED";
   format: Format;
   inputMode: "POINTS" | "GAMES";
   scoringPreset: string;
@@ -95,6 +100,16 @@ type SavedSession = {
     awayGames: number;
   }>;
 };
+type ImportRow = {
+  date: string;
+  matchType: "CASUAL" | "LEAGUE";
+  homePlayer1: string;
+  homePlayer2: string;
+  awayPlayer1: string;
+  awayPlayer2: string;
+  homeGames: number;
+  awayGames: number;
+};
 const call = async <T,>(url: string, init?: RequestInit) => {
   const response = await fetch(url, {
     headers: { "content-type": "application/json" },
@@ -102,6 +117,7 @@ const call = async <T,>(url: string, init?: RequestInit) => {
   });
   if (!response.ok)
     throw new Error((await response.json()).error ?? "Request failed");
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 };
 const tennis = (own: number, other: number) =>
@@ -139,7 +155,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   const [match, setMatch] = useState<Match | null>(null);
   const [recentSessions, setRecentSessions] = useState<SavedSession[]>([]);
   const [historyFilter, setHistoryFilter] = useState<
-    "ALL" | "ACTIVE" | "COMPLETE"
+    "ALL" | "ACTIVE" | "COMPLETE" | "CANCELLED"
   >("ALL");
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -170,6 +186,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   const [scoreSaveState, setScoreSaveState] = useState<
     "idle" | "saving" | "saved"
   >("idle");
+  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [importError, setImportError] = useState("");
+  const importInput = useRef<HTMLInputElement>(null);
   const active = useMemo(
     () => lists.find((list) => list.id === listId),
     [listId, lists],
@@ -202,6 +221,12 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
     if (listId)
       void call<Player[]>(`/api/lists/${listId}/players`)
         .then(setPlayers)
+        .catch((error: Error) => setNotice(error.message));
+  };
+  const loadHistory = () => {
+    if (listId)
+      void call<SavedSession[]>(`/api/sessions?listId=${listId}`)
+        .then(setRecentSessions)
         .catch((error: Error) => setNotice(error.message));
   };
   useEffect(() => {
@@ -499,10 +524,10 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       setNotice((error as Error).message);
     }
   };
-  const loadStats = () => {
+  const loadStats = (leagueOnly = false) => {
     if (listId)
       void call<typeof stats>(
-        `/api/stats?listId=${listId}&from=${from}&to=${to}`,
+        `/api/stats?listId=${listId}&from=${from}&to=${to}${leagueOnly ? "&format=LEAGUE" : ""}`,
       )
         .then(setStats)
         .catch((error: Error) => setNotice(error.message));
@@ -560,6 +585,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
     setOnboardingStep(0);
   };
   const shareSavedSession = async (session: SavedSession) => {
+    if (session.status !== "COMPLETE") return;
     const teamNames = new Map(
       session.teams.map((team) => [team.id, team.name]),
     );
@@ -582,6 +608,155 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       await navigator.clipboard.writeText(text);
       window.open(whatsappUrl(text), "_blank", "noopener");
       setNotice("Session recap copied and ready to share.");
+    }
+  };
+  const stopLiveScoring = async () => {
+    if (
+      !match?.session.id ||
+      !confirm(
+        "Stop scoring? The partial score will be kept as cancelled history.",
+      )
+    )
+      return;
+    try {
+      await call(`/api/sessions/${match.session.id}/cancel`, {
+        method: "POST",
+      });
+      setMatch(null);
+      setTab("history");
+      loadHistory();
+      setNotice(
+        "Live scoring stopped. The partial session is saved as cancelled history.",
+      );
+    } catch (error) {
+      setNotice((error as Error).message);
+    }
+  };
+  const deleteSession = async (session: SavedSession) => {
+    if (!confirm(`Delete ${session.name}? This cannot be undone.`)) return;
+    try {
+      await call(`/api/sessions/${session.id}`, { method: "DELETE" });
+      setExpandedSession(null);
+      loadHistory();
+      loadStats();
+      setNotice("Session deleted.");
+    } catch (error) {
+      setNotice((error as Error).message);
+    }
+  };
+  const clearHistory = async () => {
+    if (
+      prompt(
+        "Type CLEAR HISTORY to delete completed and cancelled sessions.",
+      ) !== "CLEAR HISTORY"
+    )
+      return;
+    try {
+      const result = await call<{ removed: number }>(
+        `/api/lists/${listId}/history`,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ confirmation: "CLEAR HISTORY" }),
+        },
+      );
+      setExpandedSession(null);
+      loadHistory();
+      loadStats();
+      setNotice(
+        `${result.removed} historical session${result.removed === 1 ? "" : "s"} deleted. Active scoring was left alone.`,
+      );
+    } catch (error) {
+      setNotice((error as Error).message);
+    }
+  };
+  const downloadImportTemplate = () => {
+    const csv =
+      "date,match_type,home_player_1,home_player_2,away_player_1,away_player_2,home_games,away_games\\n2026-08-04,LEAGUE,Youssef,Saif,Uthman,Todimu,3,1\\n";
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    link.download = "padel-history-template.csv";
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+  const readImport = async (file?: File) => {
+    if (!file) return;
+    const lines = (await file.text())
+      .replace(/^\uFEFF/, "")
+      .trim()
+      .split(/\r?\n/);
+    const expected =
+      "date,match_type,home_player_1,home_player_2,away_player_1,away_player_2,home_games,away_games";
+    if (!lines.length || lines[0].trim().toLowerCase() !== expected) {
+      setImportRows([]);
+      setImportError(
+        "Use the downloaded CSV template and keep its header unchanged.",
+      );
+      return;
+    }
+    const parsed: ImportRow[] = [];
+    for (const [index, line] of lines.slice(1).entries()) {
+      const cells = line.split(",").map((cell) => cell.trim());
+      if (cells.length !== 8 || cells.some((cell) => !cell)) {
+        setImportRows([]);
+        setImportError(
+          `Row ${index + 2} needs all eight comma-separated values.`,
+        );
+        return;
+      }
+      const [
+        date,
+        kind,
+        homePlayer1,
+        homePlayer2,
+        awayPlayer1,
+        awayPlayer2,
+        homeGames,
+        awayGames,
+      ] = cells;
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        !["CASUAL", "LEAGUE"].includes(kind.toUpperCase()) ||
+        !/^\d+$/.test(homeGames) ||
+        !/^\d+$/.test(awayGames)
+      ) {
+        setImportRows([]);
+        setImportError(`Row ${index + 2} has an invalid date, type, or score.`);
+        return;
+      }
+      parsed.push({
+        date: new Date(`${date}T12:00:00.000Z`).toISOString(),
+        matchType: kind.toUpperCase() as "CASUAL" | "LEAGUE",
+        homePlayer1,
+        homePlayer2,
+        awayPlayer1,
+        awayPlayer2,
+        homeGames: Number(homeGames),
+        awayGames: Number(awayGames),
+      });
+    }
+    setImportError("");
+    setImportRows(parsed);
+  };
+  const importHistory = async () => {
+    if (!importRows.length) return;
+    try {
+      const result = await call<{ imported: number }>(
+        `/api/lists/${listId}/history/import`,
+        {
+          method: "POST",
+          body: JSON.stringify({ rows: importRows }),
+        },
+      );
+      setImportRows([]);
+      if (importInput.current) importInput.current.value = "";
+      loadPlayers();
+      loadHistory();
+      loadStats();
+      setNotice(
+        `${result.imported} historical match${result.imported === 1 ? "" : "es"} imported.`,
+      );
+    } catch (error) {
+      setImportError((error as Error).message);
     }
   };
   const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -776,7 +951,8 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             data-active={tab === item}
             onClick={() => {
               setTab(item);
-              if (item === "stats" || item === "league") loadStats();
+              if (item === "stats" || item === "league")
+                loadStats(item === "league");
             }}
           >
             <Icon size={19} /> <span>{label}</span>
@@ -908,6 +1084,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   onChange={(event) => setFormat(event.target.value as Format)}
                 >
                   <option value="ROUND_ROBIN">Round robin</option>
+                  <option value="LEAGUE">League (official standings)</option>
                   <option value="WINNER_STAYS">Winner stays on</option>
                   <option value="KNOCKOUT">Knockout</option>
                   <option value="GROUPS_KNOCKOUT">Groups + knockout</option>
@@ -1297,6 +1474,15 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                     Share result
                   </button>
                 )}
+                {(match.status === "LIVE" ||
+                  match.status === "AWAITING_CONFIRMATION") && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={stopLiveScoring}
+                  >
+                    Stop live scoring
+                  </button>
+                )}
               </div>
               {match.session.matches && (
                 <section className="mt-5 rounded-xl bg-[#f4f0e7] p-3 text-sm">
@@ -1320,13 +1506,16 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                       </li>
                     ))}
                   </ul>
-                  <button
-                    className="btn btn-secondary mt-3"
-                    onClick={shareSession}
-                  >
-                    Share session
-                  </button>
-                  {match.session.format === "ROUND_ROBIN" && (
+                  {match.session.status === "COMPLETE" && (
+                    <button
+                      className="btn btn-secondary mt-3"
+                      onClick={shareSession}
+                    >
+                      Share session
+                    </button>
+                  )}
+                  {(match.session.format === "ROUND_ROBIN" ||
+                    match.session.format === "LEAGUE") && (
                     <table className="mt-3 w-full text-left">
                       <thead>
                         <tr>
@@ -1371,17 +1560,54 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
               </p>
             </div>
             <div className="history-filters" aria-label="Filter sessions">
-              {(["ALL", "ACTIVE", "COMPLETE"] as const).map((status) => (
-                <button
-                  key={status}
-                  data-active={historyFilter === status}
-                  onClick={() => setHistoryFilter(status)}
-                >
-                  {status === "ALL" ? "All" : status.toLowerCase()}
-                </button>
-              ))}
+              {(["ALL", "ACTIVE", "COMPLETE", "CANCELLED"] as const).map(
+                (status) => (
+                  <button
+                    key={status}
+                    data-active={historyFilter === status}
+                    onClick={() => setHistoryFilter(status)}
+                  >
+                    {status === "ALL" ? "All" : status.toLowerCase()}
+                  </button>
+                ),
+              )}
             </div>
           </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              className="btn btn-secondary"
+              onClick={downloadImportTemplate}
+            >
+              Download CSV template
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => importInput.current?.click()}
+            >
+              <Upload size={18} /> Upload games
+            </button>
+            <input
+              ref={importInput}
+              className="sr-only"
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(event) => void readImport(event.target.files?.[0])}
+            />
+            <button className="btn btn-secondary" onClick={clearHistory}>
+              <Trash2 size={18} /> Clear history
+            </button>
+          </div>
+          {(importError || importRows.length > 0) && (
+            <div className="sassy-note mt-4">
+              {importError ||
+                `${importRows.length} match${importRows.length === 1 ? "" : "es"} ready to import. Missing players will be added at 6.0.`}
+              {importRows.length > 0 && (
+                <button className="btn btn-coral ml-3" onClick={importHistory}>
+                  Import confirmed games
+                </button>
+              )}
+            </div>
+          )}
           {visibleSessions.length === 0 ? (
             <div className="history-empty">
               <CalendarDays size={42} />
@@ -1475,7 +1701,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                           ))}
                         </div>
                         <div className="history-actions">
-                          {latestMatch && (
+                          {latestMatch && session.status !== "CANCELLED" && (
                             <button
                               className="btn"
                               onClick={() => openMatch(latestMatch.id)}
@@ -1486,12 +1712,22 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                               <ArrowRight size={18} />
                             </button>
                           )}
-                          <button
-                            className="btn btn-secondary"
-                            onClick={() => shareSavedSession(session)}
-                          >
-                            Share recap
-                          </button>
+                          {session.status === "COMPLETE" && (
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => shareSavedSession(session)}
+                            >
+                              Share recap
+                            </button>
+                          )}
+                          {session.status !== "ACTIVE" && (
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => deleteSession(session)}
+                            >
+                              <Trash2 size={18} /> Delete
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1509,11 +1745,14 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
               <span className="kicker">THE CLUB TABLE</span>
               <h2>League standings</h2>
               <p>
-                Confirmed matches from this list become league points
-                automatically. Wins lead, then games difference and win rate.
+                Only confirmed League fixtures count here. Wins lead, then games
+                difference and win rate.
               </p>
             </div>
-            <button className="btn btn-secondary" onClick={loadStats}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => loadStats(true)}
+            >
               <Medal size={18} /> Refresh table
             </button>
           </div>
@@ -1603,7 +1842,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                 separately.
               </p>
             </div>
-            <button className="btn btn-secondary" onClick={loadStats}>
+            <button className="btn btn-secondary" onClick={() => loadStats()}>
               <BarChart3 size={18} /> Refresh
             </button>
           </div>

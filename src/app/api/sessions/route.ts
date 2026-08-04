@@ -108,7 +108,9 @@ export async function POST(req: Request) {
     if (input.format === "GROUPS_KNOCKOUT" && built.teams.length < 4)
       throw new AppError(400, "Groups + Knockout requires at least four teams");
     if (
-      (input.format === "ROUND_ROBIN" || input.format === "KNOCKOUT") &&
+      (input.format === "ROUND_ROBIN" ||
+        input.format === "KNOCKOUT" ||
+        input.format === "LEAGUE") &&
       built.teams.length < 2
     )
       throw new AppError(400, "This format requires at least two teams");
@@ -174,7 +176,7 @@ export async function POST(req: Request) {
         });
       }
       let fixtures =
-        input.format === "ROUND_ROBIN"
+        input.format === "ROUND_ROBIN" || input.format === "LEAGUE"
           ? roundRobin(teams)
           : input.format === "GROUPS_KNOCKOUT"
             ? (() => {
