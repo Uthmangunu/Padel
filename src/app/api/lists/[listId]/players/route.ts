@@ -1,0 +1,3 @@
+import { prisma } from "@/lib/prisma";import { failure } from "@/lib/http";import { playerSchema } from "@/lib/validation";
+export async function GET(_:Request,{params}:{params:Promise<{listId:string}>}){try{const {listId}=await params;return Response.json(await prisma.player.findMany({where:{listId,active:true},orderBy:[{rating:"desc"},{name:"asc"}]}))}catch(e){return failure(e)}}
+export async function POST(req:Request,{params}:{params:Promise<{listId:string}>}){try{const {listId}=await params;const data=playerSchema.parse(await req.json());return Response.json(await prisma.player.create({data:{...data,listId}}),{status:201})}catch(e){return failure(e)}}
