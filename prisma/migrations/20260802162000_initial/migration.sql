@@ -1,0 +1,19 @@
+-- Initial portable PostgreSQL schema. Prisma owns future migrations.
+CREATE TYPE "SessionStatus" AS ENUM ('SETUP','ACTIVE','COMPLETE');
+CREATE TYPE "SessionFormat" AS ENUM ('WINNER_STAYS','KNOCKOUT','ROUND_ROBIN','GROUPS_KNOCKOUT');
+CREATE TYPE "MatchStatus" AS ENUM ('PENDING','LIVE','AWAITING_CONFIRMATION','CONFIRMED');
+CREATE TYPE "InputMode" AS ENUM ('POINTS','GAMES');
+CREATE TYPE "GameRule" AS ENUM ('ADVANTAGE','GOLDEN_POINT');
+CREATE TYPE "ScoreEventType" AS ENUM ('POINT','TEAM_GAME','TIEBREAK_GAME','TIEBREAK_WINNER','UNDO');
+CREATE TABLE "List" ("id" TEXT PRIMARY KEY, "name" TEXT NOT NULL, "active" BOOLEAN NOT NULL DEFAULT true, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE "Player" ("id" TEXT PRIMARY KEY, "listId" TEXT NOT NULL REFERENCES "List"("id") ON DELETE CASCADE, "name" TEXT NOT NULL, "rating" DECIMAL(3,1) NOT NULL, "active" BOOLEAN NOT NULL DEFAULT true, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL);
+CREATE TABLE "Session" ("id" TEXT PRIMARY KEY, "listId" TEXT NOT NULL REFERENCES "List"("id") ON DELETE CASCADE, "name" TEXT NOT NULL, "format" "SessionFormat" NOT NULL, "status" "SessionStatus" NOT NULL DEFAULT 'SETUP', "gameRule" "GameRule" NOT NULL DEFAULT 'ADVANTAGE', "inputMode" "InputMode" NOT NULL DEFAULT 'POINTS', "scoringPreset" TEXT NOT NULL DEFAULT 'BEST_OF_3_STANDARD', "progression" JSONB, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "startedAt" TIMESTAMP(3), "completedAt" TIMESTAMP(3));
+CREATE TABLE "Participant" ("id" TEXT PRIMARY KEY,"sessionId" TEXT NOT NULL REFERENCES "Session"("id") ON DELETE CASCADE,"playerId" TEXT NOT NULL REFERENCES "Player"("id"),"playerName" TEXT NOT NULL,"rating" DECIMAL(3,1) NOT NULL,"benched" BOOLEAN NOT NULL DEFAULT false, UNIQUE("sessionId","playerId"));
+CREATE TABLE "Team" ("id" TEXT PRIMARY KEY,"sessionId" TEXT NOT NULL REFERENCES "Session"("id") ON DELETE CASCADE,"seed" INTEGER NOT NULL,"name" TEXT NOT NULL,"totalRating" DECIMAL(4,1) NOT NULL, UNIQUE("sessionId","seed"));
+CREATE TABLE "TeamMember" ("teamId" TEXT NOT NULL REFERENCES "Team"("id") ON DELETE CASCADE,"participantId" TEXT NOT NULL REFERENCES "Participant"("id") ON DELETE CASCADE, PRIMARY KEY("teamId","participantId"));
+CREATE TABLE "Match" ("id" TEXT PRIMARY KEY,"sessionId" TEXT NOT NULL REFERENCES "Session"("id") ON DELETE CASCADE,"homeTeamId" TEXT NOT NULL REFERENCES "Team"("id"),"awayTeamId" TEXT NOT NULL REFERENCES "Team"("id"),"round" INTEGER NOT NULL DEFAULT 1,"sequence" INTEGER NOT NULL,"group" TEXT,"status" "MatchStatus" NOT NULL DEFAULT 'PENDING',"revision" INTEGER NOT NULL DEFAULT 0,"startedAt" TIMESTAMP(3),"endedAt" TIMESTAMP(3),"winnerTeamId" TEXT,"score" JSONB,"homeGames" INTEGER NOT NULL DEFAULT 0,"awayGames" INTEGER NOT NULL DEFAULT 0,"homeSets" INTEGER NOT NULL DEFAULT 0,"awaySets" INTEGER NOT NULL DEFAULT 0,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE("sessionId","sequence"));
+CREATE TABLE "ScoreEvent" ("id" TEXT PRIMARY KEY,"matchId" TEXT NOT NULL REFERENCES "Match"("id") ON DELETE CASCADE,"sequence" INTEGER NOT NULL,"type" "ScoreEventType" NOT NULL,"winner" INTEGER,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE("matchId","sequence"));
+CREATE TABLE "MatchResult" ("id" TEXT PRIMARY KEY,"matchId" TEXT NOT NULL UNIQUE REFERENCES "Match"("id") ON DELETE CASCADE,"winnerTeamId" TEXT NOT NULL,"homeGames" INTEGER NOT NULL,"awayGames" INTEGER NOT NULL,"pointMode" BOOLEAN NOT NULL,"confirmedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX "Player_listId_active_idx" ON "Player"("listId","active");
+CREATE INDEX "Session_listId_createdAt_idx" ON "Session"("listId","createdAt");
+CREATE INDEX "Match_sessionId_status_idx" ON "Match"("sessionId","status");

@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum SessionStatus {
@@ -36,12 +37,14 @@ enum ScoreEventType {
   POINT
   TEAM_GAME
   TIEBREAK_GAME
+  TIEBREAK_WINNER
   UNDO
 }
 
 model List {
   id String @id @default(cuid())
   name String
+  active Boolean @default(true)
   createdAt DateTime @default(now())
   players Player[]
   sessions Session[]
@@ -105,7 +108,7 @@ model TeamMember {
   teamId String
   participantId String
   team Team @relation(fields:[teamId], references:[id], onDelete: Cascade)
-  participant Participant @relation(fields:[participantId], references:[id])
+  participant Participant @relation(fields:[participantId], references:[id], onDelete: Cascade)
   @@id([teamId, participantId])
 }
 model Match {
@@ -115,12 +118,17 @@ model Match {
   awayTeamId String
   round Int @default(1)
   sequence Int
+  group String?
   status MatchStatus @default(PENDING)
   revision Int @default(0)
   startedAt DateTime?
   endedAt DateTime?
   winnerTeamId String?
   score Json?
+  homeGames Int @default(0)
+  awayGames Int @default(0)
+  homeSets Int @default(0)
+  awaySets Int @default(0)
   createdAt DateTime @default(now())
   session Session @relation(fields:[sessionId], references:[id], onDelete: Cascade)
   homeTeam Team @relation("homeTeam", fields:[homeTeamId], references:[id])
@@ -128,6 +136,7 @@ model Match {
   events ScoreEvent[]
   result MatchResult?
   @@index([sessionId, status])
+  @@unique([sessionId, sequence])
 }
 model ScoreEvent {
   id String @id @default(cuid())

@@ -1,0 +1,66 @@
+export type StatMatch = {
+  winnerId: string;
+  homeId: string;
+  awayId: string;
+  homeGames: number;
+  awayGames: number;
+  homeRating: number;
+  awayRating: number;
+  pointMode: boolean;
+  clutch?: { opportunities: [number, number]; wins: [number, number] };
+  date: Date;
+};
+export const expectedWin = (own: number, opponent: number) =>
+  1 / (1 + Math.exp(-(own - opponent) / 1.4));
+export function calculateTeamStats(teamId: string, matches: StatMatch[]) {
+  let wins = 0,
+    losses = 0,
+    gamesFor = 0,
+    gamesAgainst = 0,
+    expected = 0,
+    pointMatches = 0,
+    opportunities = 0,
+    clutchWins = 0;
+  const ordered = [...matches].sort(
+    (a, b) => a.date.getTime() - b.date.getTime(),
+  );
+  let best = 0,
+    current = 0;
+  for (const m of ordered) {
+    const home = m.homeId === teamId;
+    const won = m.winnerId === teamId;
+    const own = home ? m.homeGames : m.awayGames,
+      other = home ? m.awayGames : m.homeGames,
+      r = home ? m.homeRating : m.awayRating,
+      o = home ? m.awayRating : m.homeRating;
+    gamesFor += own;
+    gamesAgainst += other;
+    expected += expectedWin(r, o);
+    if (won) {
+      wins++;
+      current = current >= 0 ? current + 1 : 1;
+      best = Math.max(best, current);
+    } else {
+      losses++;
+      current = current <= 0 ? current - 1 : -1;
+    }
+    if (m.pointMode && m.clutch) {
+      pointMatches++;
+      opportunities += m.clutch.opportunities[home ? 0 : 1];
+      clutchWins += m.clutch.wins[home ? 0 : 1];
+    }
+  }
+  return {
+    wins,
+    losses,
+    winRate: wins + losses ? wins / (wins + losses) : 0,
+    gamesDifferential: gamesFor - gamesAgainst,
+    performanceVsExpected: wins - expected,
+    currentStreak: current,
+    bestStreak: best,
+    clutchWins,
+    clutchOpportunities: opportunities,
+    eligiblePointMatches: pointMatches,
+    totalMatches: wins + losses,
+  };
+}
