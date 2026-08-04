@@ -34,6 +34,35 @@ describe("padel scoring", () => {
     expect(s.winner).toBe(0);
     expect(s.games).toEqual([3, 0]);
   });
+  it("continues at 2-1 and stops immediately at 3-1", () => {
+    let s = scoreFromEvents(
+      [0, 1, 0].map((winner) => ({
+        type: "TEAM_GAME" as const,
+        winner: winner as 0 | 1,
+      })),
+      "RACE_TO_3",
+      "ADVANTAGE",
+    );
+    expect(s.games).toEqual([2, 1]);
+    expect(s.winner).toBeUndefined();
+
+    s = reduceScore(
+      s,
+      { type: "TEAM_GAME", winner: 0 },
+      "RACE_TO_3",
+      "ADVANTAGE",
+    );
+    expect(s.games).toEqual([3, 1]);
+    expect(s.winner).toBe(0);
+
+    s = reduceScore(
+      s,
+      { type: "TEAM_GAME", winner: 1 },
+      "RACE_TO_3",
+      "ADVANTAGE",
+    );
+    expect(s.games).toEqual([3, 1]);
+  });
   it("supports a standard tiebreak", () => {
     let s = initialScore();
     for (let i = 0; i < 12; i++)

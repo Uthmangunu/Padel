@@ -2,6 +2,8 @@
 
 A mobile-first, open-source app for organising recreational padel: keep a roster, form fair teams, run sessions, score live matches and review results. It is intentionally unauthenticated and is suitable for a trusted group, not private records.
 
+![Padel Manager roster](docs/screenshots/roster.png)
+
 ## Run locally
 
 ```bash

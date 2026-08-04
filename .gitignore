@@ -1,9 +1,11 @@
 node_modules
 .next
-.env
-.env.local
+.env*
+!.env.example
 coverage
 playwright-report
 test-results
 prisma/dev.db
 tsconfig.tsbuildinfo
+.vercel
+.neon

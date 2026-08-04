@@ -1,22 +1,22 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 const roster = [
-  ["Youssef", 9.5],
-  ["Saif", 9],
-  ["Uthman", 8.5],
-  ["Todimu", 8],
-  ["Bubu", 8],
-  ["Farouk", 8],
-  ["Abdallah", 7.5],
-  ["Walid", 7],
-  ["Ommatta", 7],
-  ["Murtala", 7],
-  ["Jedy", 6.5],
+  ["Youssef", 6],
+  ["Saif", 6],
+  ["Uthman", 6],
+  ["Todimu", 6],
+  ["Bubu", 6],
+  ["Farouk", 6],
+  ["Abdallah", 6],
+  ["Walid", 6],
+  ["Ommatta", 6],
+  ["Murtala", 6],
+  ["Jedy", 6],
   ["Safir", 6],
-  ["Ebube", 5.5],
-  ["Mukthar", 3.5],
-  ["Dozie", 3.5],
-  ["Safwaan", 3],
+  ["Ebube", 6],
+  ["Mukthar", 6],
+  ["Dozie", 6],
+  ["Safwaan", 6],
 ] as const;
 async function main() {
   const list = await prisma.list.upsert({

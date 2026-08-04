@@ -1,22 +1,45 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Archive,
+  ArrowLeft,
+  ArrowRight,
+  BarChart3,
+  CalendarDays,
+  CheckCircle2,
+  CircleGauge,
+  History,
+  Info,
+  ListPlus,
+  LoaderCircle,
+  Medal,
+  Pencil,
+  ShieldAlert,
+  Shuffle,
+  Sparkles,
+  Trophy,
+  UserPlus,
+  UsersRound,
+  Zap,
+} from "lucide-react";
+import {
   buildBalancedTeams,
   lineupSignature,
   type Constraint,
 } from "@/lib/teams";
 import { formatMatchShare, formatSessionShare, whatsappUrl } from "@/lib/share";
 import { roundRobinStandings } from "@/lib/formats";
+import {
+  initialScore,
+  reduceScore,
+  type GameRule as ScoringGameRule,
+  type MatchScore,
+  type Preset as ScoringPreset,
+  type ScoreEvent,
+} from "@/lib/scoring";
 type List = { id: string; name: string };
 type Player = { id: string; name: string; rating: number };
-type Score = {
-  points: [number, number];
-  games: [number, number];
-  sets: [number, number];
-  totalGames: [number, number];
-  winner?: number;
-  tiebreak: [number, number] | null;
-};
+type Score = MatchScore;
 type Match = {
   id: string;
   status: string;
@@ -49,6 +72,29 @@ type Match = {
   };
 };
 type Format = "WINNER_STAYS" | "KNOCKOUT" | "ROUND_ROBIN" | "GROUPS_KNOCKOUT";
+type SavedSession = {
+  id: string;
+  name: string;
+  status: "SETUP" | "ACTIVE" | "COMPLETE";
+  format: Format;
+  inputMode: "POINTS" | "GAMES";
+  scoringPreset: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  teams: Array<{ id: string; name: string; seed: number }>;
+  matches: Array<{
+    id: string;
+    sequence: number;
+    round: number;
+    status: string;
+    homeTeamId: string;
+    awayTeamId: string;
+    winnerTeamId: string | null;
+    homeGames: number;
+    awayGames: number;
+  }>;
+};
 const call = async <T,>(url: string, init?: RequestInit) => {
   const response = await fetch(url, {
     headers: { "content-type": "application/json" },
@@ -71,9 +117,9 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   const [listId, setListId] = useState(initialLists[0]?.id ?? "");
   const [players, setPlayers] = useState<Player[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [tab, setTab] = useState<"roster" | "teams" | "score" | "stats">(
-    "roster",
-  );
+  const [tab, setTab] = useState<
+    "roster" | "teams" | "score" | "history" | "league" | "stats"
+  >("roster");
   const [teams, setTeams] = useState<ReturnType<
     typeof buildBalancedTeams
   > | null>(null);
@@ -91,14 +137,13 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   );
   const [inputMode, setInputMode] = useState<"POINTS" | "GAMES">("POINTS");
   const [match, setMatch] = useState<Match | null>(null);
-  const [recentSessions, setRecentSessions] = useState<
-    Array<{
-      id: string;
-      name: string;
-      status: string;
-      matches: Array<{ id: string; sequence: number }>;
-    }>
-  >([]);
+  const [recentSessions, setRecentSessions] = useState<SavedSession[]>([]);
+  const [historyFilter, setHistoryFilter] = useState<
+    "ALL" | "ACTIVE" | "COMPLETE"
+  >("ALL");
+  const [expandedSession, setExpandedSession] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
   const [stats, setStats] = useState<{
     coverage: { pointModeMatches: number; totalMatches: number };
     players: Array<{
@@ -122,11 +167,37 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   const [to, setTo] = useState("");
   const [notice, setNotice] = useState("");
   const [seconds, setSeconds] = useState(0);
+  const [scoreSaveState, setScoreSaveState] = useState<
+    "idle" | "saving" | "saved"
+  >("idle");
   const active = useMemo(
     () => lists.find((list) => list.id === listId),
     [listId, lists],
   );
+  const visibleSessions = useMemo(
+    () =>
+      recentSessions.filter(
+        (session) =>
+          historyFilter === "ALL" || session.status === historyFilter,
+      ),
+    [historyFilter, recentSessions],
+  );
+  const leagueTable = useMemo(
+    () =>
+      [...(stats?.players ?? [])].sort(
+        (a, b) =>
+          b.wins - a.wins ||
+          b.gamesDifferential - a.gamesDifferential ||
+          b.winRate - a.winRate ||
+          a.name.localeCompare(b.name),
+      ),
+    [stats],
+  );
   const roster = players.filter((player) => selected.includes(player.id));
+  useEffect(() => {
+    if (window.localStorage.getItem("padel-onboarding-v1") !== "done")
+      setShowOnboarding(true);
+  }, []);
   const loadPlayers = () => {
     if (listId)
       void call<Player[]>(`/api/lists/${listId}/players`)
@@ -167,14 +238,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         if (live) void openMatch(live.id);
       })
       .catch(() => undefined);
-    void call<
-      Array<{
-        id: string;
-        name: string;
-        status: string;
-        matches: Array<{ id: string; sequence: number }>;
-      }>
-    >(`/api/sessions?listId=${listId}`)
+    void call<SavedSession[]>(`/api/sessions?listId=${listId}`)
       .then(setRecentSessions)
       .catch(() => undefined);
   }, [listId]);
@@ -208,7 +272,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
   };
   const addPlayer = async () => {
     const name = prompt("Player name");
-    const rating = Number(prompt("Rating (1.0–10.0)", "7.0"));
+    const rating = Number(prompt("Rating (1.0–10.0)", "6.0"));
     if (!name) return;
     try {
       await call(`/api/lists/${listId}/players`, {
@@ -230,6 +294,22 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         body: JSON.stringify({ name, rating }),
       });
       loadPlayers();
+    } catch (error) {
+      setNotice((error as Error).message);
+    }
+  };
+  const editRating = async (player: Player) => {
+    const rating = Number(
+      prompt(`${player.name}'s rating (1.0–10.0)`, player.rating.toFixed(1)),
+    );
+    if (!Number.isFinite(rating)) return;
+    try {
+      await call(`/api/players/${player.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: player.name, rating }),
+      });
+      loadPlayers();
+      setNotice(`${player.name}'s rating is now ${rating.toFixed(1)}.`);
     } catch (error) {
       setNotice((error as Error).message);
     }
@@ -298,6 +378,47 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         "Session started. Team snapshots and live score are now persisted.",
       );
       if (session.matches[0]) await openMatch(session.matches[0].id);
+      void call<SavedSession[]>(`/api/sessions?listId=${listId}`).then(
+        setRecentSessions,
+      );
+    } catch (error) {
+      setNotice((error as Error).message);
+    }
+  };
+  const startQuickKickoff = async () => {
+    if (roster.length !== 4) {
+      setNotice("Quick Kickoff needs exactly four selected players.");
+      return;
+    }
+    try {
+      const quickTeams = buildBalancedTeams(roster);
+      const session = await call<{ matches: Array<{ id: string }> }>(
+        "/api/sessions",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            listId,
+            name: `Quick kickoff · ${new Intl.DateTimeFormat(undefined, {
+              dateStyle: "medium",
+            }).format(new Date())}`,
+            format: "ROUND_ROBIN",
+            gameRule: "GOLDEN_POINT",
+            inputMode: "GAMES",
+            scoringPreset: "RACE_TO_3",
+            playerIds: selected,
+            teams: quickTeams.teams.map((team) => [
+              team.members[0].id,
+              team.members[1].id,
+            ]),
+            benchedIds: [],
+          }),
+        },
+      );
+      setNotice("Quick Kickoff is live. Every game is saved automatically.");
+      if (session.matches[0]) await openMatch(session.matches[0].id);
+      void call<SavedSession[]>(`/api/sessions?listId=${listId}`).then(
+        setRecentSessions,
+      );
     } catch (error) {
       setNotice((error as Error).message);
     }
@@ -320,13 +441,40 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       | "CONFIRM",
     winner?: 0 | 1,
   ) => {
-    if (!match) return;
-    try {
-      const updated = await call<Match>(`/api/matches/${match.id}/score`, {
-        method: "POST",
-        body: JSON.stringify({ revision: match.revision, action, winner }),
+    if (!match || scoreSaveState === "saving") return;
+    const before = match;
+    setScoreSaveState("saving");
+    if (action !== "UNDO" && action !== "CONFIRM" && winner !== undefined) {
+      const optimistic = reduceScore(
+        match.score ?? initialScore(),
+        { type: action as ScoreEvent["type"], winner },
+        match.session.scoringPreset as ScoringPreset,
+        match.session.gameRule as ScoringGameRule,
+      );
+      setMatch({
+        ...match,
+        score: optimistic,
+        status:
+          optimistic.winner === undefined ? "LIVE" : "AWAITING_CONFIRMATION",
       });
-      setMatch((value) => (value ? { ...value, ...updated } : updated));
+    }
+    try {
+      const updated = await call<Match>(`/api/matches/${before.id}/score`, {
+        method: "POST",
+        body: JSON.stringify({ revision: before.revision, action, winner }),
+      });
+      setMatch({ ...before, ...updated });
+      setScoreSaveState("saved");
+      window.setTimeout(() => setScoreSaveState("idle"), 1200);
+      if (action !== "CONFIRM" && updated.score?.winner !== undefined) {
+        const winnerName =
+          updated.score.winner === 0
+            ? before.homeTeam.name
+            : before.awayTeam.name;
+        setNotice(
+          `${winnerName} wins ${updated.score.totalGames[0]}–${updated.score.totalGames[1]}. Result saved — confirm it to finish.`,
+        );
+      }
       if (action === "CONFIRM") {
         const sessions = await call<
           Array<{ matches: Array<{ id: string; status: string }> }>
@@ -336,21 +484,18 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           .find((item) => item.status === "LIVE");
         if (next) await openMatch(next.id);
         else {
-          await openMatch(match.id);
+          await openMatch(before.id);
           setNotice(
             "Session complete — final standings and sharing remain available.",
           );
         }
-        void call<
-          Array<{
-            id: string;
-            name: string;
-            status: string;
-            matches: Array<{ id: string; sequence: number }>;
-          }>
-        >(`/api/sessions?listId=${listId}`).then(setRecentSessions);
+        void call<SavedSession[]>(`/api/sessions?listId=${listId}`).then(
+          setRecentSessions,
+        );
       }
     } catch (error) {
+      setMatch(before);
+      setScoreSaveState("idle");
       setNotice((error as Error).message);
     }
   };
@@ -409,19 +554,143 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
       window.open(whatsappUrl(text), "_blank", "noopener");
     }
   };
+  const finishOnboarding = () => {
+    window.localStorage.setItem("padel-onboarding-v1", "done");
+    setShowOnboarding(false);
+    setOnboardingStep(0);
+  };
+  const shareSavedSession = async (session: SavedSession) => {
+    const teamNames = new Map(
+      session.teams.map((team) => [team.id, team.name]),
+    );
+    const text = formatSessionShare({
+      session: session.name,
+      format: session.format.replaceAll("_", " "),
+      fixtures: session.matches
+        .filter((item) => item.status === "CONFIRMED")
+        .map((item) => ({
+          home: teamNames.get(item.homeTeamId) ?? "Home",
+          away: teamNames.get(item.awayTeamId) ?? "Away",
+          score: `${item.homeGames}–${item.awayGames}`,
+          winner: item.winnerTeamId
+            ? teamNames.get(item.winnerTeamId)
+            : undefined,
+        })),
+    });
+    if (navigator.share) await navigator.share({ title: session.name, text });
+    else {
+      await navigator.clipboard.writeText(text);
+      window.open(whatsappUrl(text), "_blank", "noopener");
+      setNotice("Session recap copied and ready to share.");
+    }
+  };
   const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  const onboardingSlides = [
+    {
+      icon: UsersRound,
+      kicker: "WELCOME TO PADEL PARTY",
+      title: "Your whole club night, in one place.",
+      copy: "Keep an open-ended roster, choose who's playing tonight and leave the spreadsheet at home.",
+    },
+    {
+      icon: Shuffle,
+      kicker: "BALANCE THE CHAOS",
+      title: "Fair teams without the politics.",
+      copy: "Ratings, forced pairs, blocked pairs and genuine reshuffles help you build matchups everyone can argue about equally.",
+    },
+    {
+      icon: Trophy,
+      kicker: "RUN THE COURT",
+      title: "Score live. Undo mistakes. Keep moving.",
+      copy: "Every tap is saved, refresh-safe and undoable until you confirm the result. The next fixture is handled for you.",
+    },
+    {
+      icon: History,
+      kicker: "KEEP THE RECEIPTS",
+      title: "Every session becomes club history.",
+      copy: "Come back to past fixtures, scores and formats whenever you want—then share the recap with the group chat.",
+    },
+  ];
+  const onboarding = onboardingSlides[onboardingStep];
+  const OnboardingIcon = onboarding.icon;
   return (
     <main className="shell">
-      <header className="flex flex-wrap items-center justify-between gap-3 py-4">
-        <div>
-          <p className="text-pine mb-1 text-sm font-bold tracking-[.18em]">
-            PADEL MANAGER
-          </p>
-          <h1 className="m-0 text-3xl font-black">Your court, organised.</h1>
+      {showOnboarding && (
+        <div className="onboarding-backdrop">
+          <section
+            className="onboarding-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="onboarding-title"
+          >
+            <button className="skip-intro" onClick={finishOnboarding}>
+              Skip intro
+            </button>
+            <div className="onboarding-art" data-step={onboardingStep}>
+              <OnboardingIcon size={52} strokeWidth={2.4} />
+              <span>{String(onboardingStep + 1).padStart(2, "0")}</span>
+            </div>
+            <div className="onboarding-copy">
+              <span className="kicker">{onboarding.kicker}</span>
+              <h2 id="onboarding-title">{onboarding.title}</h2>
+              <p>{onboarding.copy}</p>
+            </div>
+            <div className="onboarding-dots" aria-label="Onboarding progress">
+              {onboardingSlides.map((slide, index) => (
+                <span
+                  key={slide.kicker}
+                  data-active={index === onboardingStep}
+                />
+              ))}
+            </div>
+            <div className="onboarding-actions">
+              {onboardingStep > 0 ? (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setOnboardingStep((step) => step - 1)}
+                >
+                  <ArrowLeft size={18} /> Back
+                </button>
+              ) : (
+                <span />
+              )}
+              <button
+                className="btn btn-coral"
+                onClick={() =>
+                  onboardingStep === onboardingSlides.length - 1
+                    ? finishOnboarding()
+                    : setOnboardingStep((step) => step + 1)
+                }
+              >
+                {onboardingStep === onboardingSlides.length - 1
+                  ? "Let's play"
+                  : "Show me"}
+                <ArrowRight size={18} />
+              </button>
+            </div>
+          </section>
         </div>
-        <div className="flex gap-2">
+      )}
+      <div className="topbar">
+        <div className="brand-lockup">
+          <span className="brand-ball">P</span>
+          <span>
+            <b>PADEL PARTY</b>
+            <small>Match night, minus the admin drama.</small>
+          </span>
+        </div>
+        <div className="list-tools">
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              setOnboardingStep(0);
+              setShowOnboarding(true);
+            }}
+          >
+            <Info size={18} /> How it works
+          </button>
           <select
-            className="field w-auto"
+            className="field list-picker"
             aria-label="Active list"
             value={listId}
             onChange={(event) => {
@@ -436,33 +705,81 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
               </option>
             ))}
           </select>
-          <button className="btn btn-secondary" onClick={renameList}>
-            Rename
+          <button
+            className="icon-btn"
+            aria-label="Rename list"
+            title="Rename list"
+            onClick={renameList}
+          >
+            <Pencil size={18} />
           </button>
-          <button className="btn btn-secondary" onClick={archiveList}>
-            Archive
+          <button
+            className="icon-btn"
+            aria-label="Archive list"
+            title="Archive list"
+            onClick={archiveList}
+          >
+            <Archive size={18} />
           </button>
-          <button className="btn btn-secondary" onClick={addList}>
-            New list
+          <button className="btn btn-coral" onClick={addList}>
+            <ListPlus size={18} /> New list
           </button>
         </div>
+      </div>
+      <header className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">
+            <Sparkles size={16} /> THE GROUP CHAT&apos;S NEW CAPTAIN
+          </p>
+          <h1>Your court, organised.</h1>
+          <p className="hero-lede">
+            Pick the crew, split the talent, settle the score. No spreadsheets.
+            No suspiciously convenient team selections.
+          </p>
+          <div className="hero-chips">
+            <span>
+              <UsersRound size={17} /> Roster grows with you
+            </span>
+            <span>
+              <Zap size={17} /> {selected.length} ready to cook
+            </span>
+          </div>
+        </div>
+        <span className="hero-sticker">
+          NO BORING
+          <br />
+          TEAMS
+        </span>
       </header>
-      <p className="rounded-xl border border-[#e8d7a2] bg-[#fff8db] p-3 text-sm">
-        Open shared app: anyone with this link can edit the roster and results.
-        Add an admin-key guard before using it for sensitive records.
+      <p className="public-note">
+        <ShieldAlert size={19} />
+        <span>
+          <b>Open court.</b> Anyone with this link can edit the roster and
+          results. Keep sensitive records off it.
+        </span>
       </p>
-      <nav className="mt-4 mb-6 flex gap-6 border-b">
-        {(["roster", "teams", "score", "stats"] as const).map((item) => (
+      <nav className="app-nav">
+        {(
+          [
+            ["roster", UsersRound, "The crew"],
+            ["teams", Shuffle, "Team chaos"],
+            ["score", Trophy, "Score it"],
+            ["history", History, "History"],
+            ["league", Medal, "League"],
+            ["stats", BarChart3, "Receipts"],
+          ] as const
+        ).map(([item, Icon, label]) => (
           <button
             key={item}
-            className="tab capitalize"
+            className="tab"
+            aria-label={item}
             data-active={tab === item}
             onClick={() => {
               setTab(item);
-              if (item === "stats") loadStats();
+              if (item === "stats" || item === "league") loadStats();
             }}
           >
-            {item}
+            <Icon size={19} /> <span>{label}</span>
           </button>
         ))}
       </nav>
@@ -472,47 +789,61 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         </p>
       )}
       {tab === "roster" && (
-        <section className="card">
-          <div className="mb-4 flex justify-between">
+        <section className="card roster-section">
+          <div className="section-heading">
             <div>
-              <h2 className="m-0 text-xl">Roster</h2>
-              <p className="mb-0 text-sm text-[#557065]">
-                Select players for the next session.
+              <span className="kicker">STEP 01 · CHOOSE YOUR FIGHTERS</span>
+              <h2>Who&apos;s causing trouble tonight?</h2>
+              <p>
+                Tap everyone who&apos;s actually turning up. Bold of us to trust
+                the group chat.
               </p>
             </div>
-            <button className="btn" onClick={addPlayer}>
-              Add player
-            </button>
+            <div className="roster-actions">
+              <button
+                className="btn btn-coral"
+                disabled={selected.length !== 4}
+                onClick={startQuickKickoff}
+              >
+                <Zap size={18} /> Quick Kickoff · pick 4
+              </button>
+              <button className="btn" onClick={addPlayer}>
+                <UserPlus size={18} /> Add player
+              </button>
+            </div>
           </div>
-          <div className="grid-2 mb-4 grid">
-            <label>
-              From
-              <input
-                className="field"
-                type="date"
-                value={from}
-                onChange={(event) => setFrom(event.target.value)}
-              />
-            </label>
-            <label>
-              To
-              <input
-                className="field"
-                type="date"
-                value={to}
-                onChange={(event) => setTo(event.target.value)}
-              />
-            </label>
-          </div>
-          <div className="grid-2 grid">
-            {players.map((player) => (
+          {selected.length > 0 && (
+            <div className="selection-strip">
+              <span>
+                <b>{selected.length} picked.</b> Enough talent? We&apos;ll see.
+              </span>
+              <div className="selection-actions">
+                {selected.length === 4 && (
+                  <button className="btn btn-coral" onClick={startQuickKickoff}>
+                    Kick off now <Zap size={17} />
+                  </button>
+                )}
+                <button
+                  className="btn btn-lime"
+                  onClick={() => setTab("teams")}
+                >
+                  Make the teams <Shuffle size={17} />
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="player-grid">
+            {players.map((player, index) => (
               <div
                 key={player.id}
-                className="flex items-center justify-between rounded-xl border border-[#e1e8df] p-3"
+                className="player-card"
+                data-selected={selected.includes(player.id)}
+                data-tone={index % 6}
               >
-                <label className="flex cursor-pointer items-center gap-3">
+                <label className="player-main">
                   <input
                     type="checkbox"
+                    aria-label={player.name}
                     checked={selected.includes(player.id)}
                     onChange={() =>
                       setSelected((ids) =>
@@ -522,15 +853,30 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                       )
                     }
                   />
-                  <b>{player.name}</b>
+                  <span className="avatar" aria-hidden="true">
+                    {player.name.slice(0, 1)}
+                  </span>
+                  <span className="player-name">
+                    <b>{player.name}</b>
+                    <small>Player rating</small>
+                  </span>
                 </label>
-                <span className="flex items-center gap-2">
-                  <span className="pill">{player.rating.toFixed(1)}</span>
+                <span className="player-actions">
+                  <span className="rating">
+                    <CircleGauge size={15} /> {player.rating.toFixed(1)}
+                  </span>
                   <button
-                    aria-label={`Edit ${player.name}`}
+                    className="rating-edit"
+                    aria-label={`Edit rating for ${player.name}`}
+                    onClick={() => editRating(player)}
+                  >
+                    Edit rating
+                  </button>
+                  <button
+                    aria-label={`Edit name for ${player.name}`}
                     onClick={() => editPlayer(player)}
                   >
-                    Edit
+                    <Pencil size={16} />
                   </button>
                   <button
                     aria-label={`Archive ${player.name}`}
@@ -545,9 +891,14 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
         </section>
       )}
       {tab === "teams" && (
-        <section className="grid-2 grid">
-          <div className="card">
-            <h2 className="mt-0">Build the court</h2>
+        <section className="arena-layout grid-2 grid">
+          <div className="card team-builder">
+            <span className="kicker">STEP 02 · LET THE MATH COOK</span>
+            <h2 className="mt-1">Build the court</h2>
+            <p className="section-copy">
+              Fair teams, spicy matchups, absolutely no picking your best mate
+              just because he drove.
+            </p>
             <div className="grid-2 grid">
               <label>
                 Format
@@ -605,13 +956,13 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <button className="btn" onClick={() => generate()}>
-                Auto-balance
+                <Zap size={18} /> Auto-balance
               </button>
               <button
                 className="btn btn-secondary"
                 onClick={() => generate(true)}
               >
-                Genuine reshuffle
+                <Shuffle size={18} /> Genuine reshuffle
               </button>
               <button
                 className="btn btn-secondary"
@@ -678,18 +1029,22 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
             )}
             {teams && (
               <>
-                <p className="text-sm">
-                  Rating spread: <b>{teams.imbalance.toFixed(1)}</b>. Edit a
-                  team by selecting two player IDs below.
+                <p className="balance-readout">
+                  <Sparkles size={17} /> Rating spread:{" "}
+                  <b>{teams.imbalance.toFixed(1)}</b>. The algorithm has spoken.
                 </p>
-                <div className="grid">
+                <div className="team-stack grid">
                   {teams.teams.map((team, index) => (
-                    <div key={index} className="bg-mint rounded-xl p-3">
-                      <b>Team {index + 1}</b>
-                      <span className="pill float-right">
+                    <div
+                      key={index}
+                      className="team-card"
+                      data-team-tone={index % 4}
+                    >
+                      <span className="team-number">TEAM {index + 1}</span>
+                      <span className="rating float-right">
                         {team.total.toFixed(1)}
                       </span>
-                      <p>
+                      <p className="team-names">
                         {team.members.map((member) => member.name).join(" + ")}
                       </p>
                       <select
@@ -739,27 +1094,37 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                     {teams.benched.map((player) => player.name).join(", ")}
                   </p>
                 )}
-                <button className="btn mt-4" onClick={createSession}>
-                  Start session
+                <button className="btn btn-coral mt-4" onClick={createSession}>
+                  <Trophy size={18} /> Start session
                 </button>
               </>
             )}
           </div>
-          <aside className="card">
-            <h2 className="mt-0">Fixed after kickoff</h2>
-            <p className="text-sm text-[#557065]">
+          <aside className="card house-rules">
+            <span className="house-emoji">🏓</span>
+            <span className="kicker">HOUSE RULES</span>
+            <h2>Once the ball&apos;s live, no funny business.</h2>
+            <p>
               Teams, participant snapshots and scoring configuration freeze when
               a session starts. An odd player is explicitly benched.
             </p>
+            <div className="sassy-note">
+              “But I wanted Saif!” — denied by the algorithm.
+            </div>
           </aside>
         </section>
       )}
       {tab === "score" && (
         <section>
           {!match ? (
-            <div className="card">
-              <h2 className="mt-0">No live match</h2>
-              <p>Start or resume a session from Teams.</p>
+            <div className="card empty-court">
+              <span className="empty-ball">●</span>
+              <span className="kicker">THE COURT IS SUSPICIOUSLY QUIET</span>
+              <h2>No live match</h2>
+              <p>
+                Build the teams, start the session, then let the arguments
+                begin.
+              </p>
               {recentSessions.length > 0 && (
                 <div className="mt-4">
                   <b>Recent sessions</b>
@@ -785,15 +1150,28 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
               )}
             </div>
           ) : (
-            <div className="card mx-auto max-w-3xl">
-              <div className="flex justify-between">
+            <div className="card scoreboard mx-auto max-w-3xl">
+              <div className="score-topline flex justify-between">
                 <span className="pill">
                   {match.status.replaceAll("_", " ")}
                 </span>
+                <span className="score-sync" role="status">
+                  {scoreSaveState === "saving" ? (
+                    <>
+                      <LoaderCircle className="spin" size={16} /> Saving…
+                    </>
+                  ) : scoreSaveState === "saved" ? (
+                    <>
+                      <CheckCircle2 size={16} /> Saved
+                    </>
+                  ) : (
+                    "Every tap saves"
+                  )}
+                </span>
                 <b aria-label="Match clock">{clock}</b>
               </div>
-              <div className="grid-2 my-7 grid text-center">
-                <div>
+              <div className="score-teams grid-2 my-7 grid text-center">
+                <div className="score-side score-home">
                   <h2>{match.homeTeam.name}</h2>
                   <strong className="text-6xl">
                     {match.score?.games[0] ?? 0}
@@ -808,7 +1186,7 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                     {match.score?.tiebreak ? "tiebreak" : "points"}
                   </p>
                 </div>
-                <div>
+                <div className="score-side score-away">
                   <h2>{match.awayTeam.name}</h2>
                   <strong className="text-6xl">
                     {match.score?.games[1] ?? 0}
@@ -824,65 +1202,92 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
                   </p>
                 </div>
               </div>
-              <div className="grid-2 grid">
-                <button
-                  className="btn min-h-20"
-                  onClick={() =>
-                    score(
-                      match.score?.tiebreak
-                        ? match.session.inputMode === "GAMES"
-                          ? "TIEBREAK_WINNER"
-                          : "TIEBREAK_GAME"
-                        : match.session.inputMode === "POINTS"
-                          ? "POINT"
-                          : "TEAM_GAME",
-                      0,
-                    )
-                  }
-                >
-                  {match.homeTeam.name} wins{" "}
-                  {match.score?.tiebreak
-                    ? match.session.inputMode === "GAMES"
-                      ? "tiebreak"
-                      : "tiebreak point"
-                    : match.session.inputMode === "POINTS"
-                      ? "point"
-                      : "game"}
-                </button>
-                <button
-                  className="btn min-h-20"
-                  onClick={() =>
-                    score(
-                      match.score?.tiebreak
-                        ? match.session.inputMode === "GAMES"
-                          ? "TIEBREAK_WINNER"
-                          : "TIEBREAK_GAME"
-                        : match.session.inputMode === "POINTS"
-                          ? "POINT"
-                          : "TEAM_GAME",
-                      1,
-                    )
-                  }
-                >
-                  {match.awayTeam.name} wins{" "}
-                  {match.score?.tiebreak
-                    ? match.session.inputMode === "GAMES"
-                      ? "tiebreak"
-                      : "tiebreak point"
-                    : match.session.inputMode === "POINTS"
-                      ? "point"
-                      : "game"}
-                </button>
-              </div>
+              {match.score?.winner !== undefined && (
+                <div className="victory-banner" role="status">
+                  <Trophy size={38} />
+                  <span>
+                    <b>
+                      {match.score.winner === 0
+                        ? match.homeTeam.name
+                        : match.awayTeam.name}{" "}
+                      wins {match.score.totalGames[0]}–
+                      {match.score.totalGames[1]}!
+                    </b>
+                    <small>
+                      The match has stopped and the result is saved. Confirm it
+                      to lock the result and continue.
+                    </small>
+                  </span>
+                </div>
+              )}
+              {match.status === "LIVE" && (
+                <div className="score-actions grid-2 grid">
+                  <button
+                    className="btn min-h-20"
+                    disabled={scoreSaveState === "saving"}
+                    onClick={() =>
+                      score(
+                        match.score?.tiebreak
+                          ? match.session.inputMode === "GAMES"
+                            ? "TIEBREAK_WINNER"
+                            : "TIEBREAK_GAME"
+                          : match.session.inputMode === "POINTS"
+                            ? "POINT"
+                            : "TEAM_GAME",
+                        0,
+                      )
+                    }
+                  >
+                    {match.homeTeam.name} wins{" "}
+                    {match.score?.tiebreak
+                      ? match.session.inputMode === "GAMES"
+                        ? "tiebreak"
+                        : "tiebreak point"
+                      : match.session.inputMode === "POINTS"
+                        ? "point"
+                        : "game"}
+                  </button>
+                  <button
+                    className="btn min-h-20"
+                    disabled={scoreSaveState === "saving"}
+                    onClick={() =>
+                      score(
+                        match.score?.tiebreak
+                          ? match.session.inputMode === "GAMES"
+                            ? "TIEBREAK_WINNER"
+                            : "TIEBREAK_GAME"
+                          : match.session.inputMode === "POINTS"
+                            ? "POINT"
+                            : "TEAM_GAME",
+                        1,
+                      )
+                    }
+                  >
+                    {match.awayTeam.name} wins{" "}
+                    {match.score?.tiebreak
+                      ? match.session.inputMode === "GAMES"
+                        ? "tiebreak"
+                        : "tiebreak point"
+                      : match.session.inputMode === "POINTS"
+                        ? "point"
+                        : "game"}
+                  </button>
+                </div>
+              )}
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   className="btn btn-secondary"
+                  disabled={scoreSaveState === "saving"}
                   onClick={() => score("UNDO")}
                 >
                   Undo
                 </button>
                 {match.status === "AWAITING_CONFIRMATION" && (
-                  <button className="btn" onClick={() => score("CONFIRM")}>
+                  <button
+                    className="btn btn-coral"
+                    disabled={scoreSaveState === "saving"}
+                    onClick={() => score("CONFIRM")}
+                  >
                     Confirm result
                   </button>
                 )}
@@ -954,33 +1359,285 @@ export function PadelApp({ initialLists }: { initialLists: List[] }) {
           )}
         </section>
       )}
-      {tab === "stats" && (
-        <section className="card">
-          <div className="mb-4 flex justify-between">
+      {tab === "history" && (
+        <section className="card history-section">
+          <div className="section-heading">
             <div>
-              <h2 className="m-0">Player statistics</h2>
-              <p className="mb-0 text-sm text-[#557065]">
-                Clutch samples are limited to point-tapped matches.
+              <span className="kicker">SAVED TO THE CLUBHOUSE</span>
+              <h2>Past games</h2>
+              <p>
+                Every started session is saved automatically. Reopen the score,
+                inspect every fixture or send the recap back to the group chat.
+              </p>
+            </div>
+            <div className="history-filters" aria-label="Filter sessions">
+              {(["ALL", "ACTIVE", "COMPLETE"] as const).map((status) => (
+                <button
+                  key={status}
+                  data-active={historyFilter === status}
+                  onClick={() => setHistoryFilter(status)}
+                >
+                  {status === "ALL" ? "All" : status.toLowerCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+          {visibleSessions.length === 0 ? (
+            <div className="history-empty">
+              <CalendarDays size={42} />
+              <h3>No sessions saved yet.</h3>
+              <p>Your first confirmed rivalry will live here forever.</p>
+              <button className="btn" onClick={() => setTab("roster")}>
+                Pick the crew <ArrowRight size={18} />
+              </button>
+            </div>
+          ) : (
+            <div className="history-list">
+              {visibleSessions.map((session) => {
+                const teamNames = new Map(
+                  session.teams.map((team) => [team.id, team.name]),
+                );
+                const sortedMatches = [...session.matches].sort(
+                  (a, b) => a.sequence - b.sequence,
+                );
+                const latestMatch = sortedMatches.at(-1);
+                const confirmed = session.matches.filter(
+                  (item) => item.status === "CONFIRMED",
+                ).length;
+                const expanded = expandedSession === session.id;
+                return (
+                  <article className="history-card" key={session.id}>
+                    <button
+                      className="history-summary"
+                      aria-label={`${session.name} history`}
+                      aria-expanded={expanded}
+                      onClick={() =>
+                        setExpandedSession(expanded ? null : session.id)
+                      }
+                    >
+                      <span className="history-date">
+                        <CalendarDays size={19} />
+                        {new Intl.DateTimeFormat(undefined, {
+                          dateStyle: "medium",
+                        }).format(
+                          new Date(session.startedAt ?? session.createdAt),
+                        )}
+                      </span>
+                      <span className="history-title">
+                        <b>{session.name}</b>
+                        <small>
+                          {session.format.replaceAll("_", " ")} · {confirmed}/
+                          {session.matches.length} results confirmed
+                        </small>
+                      </span>
+                      <span
+                        className="history-status"
+                        data-status={session.status}
+                      >
+                        {session.status.toLowerCase()}
+                      </span>
+                      <ArrowRight
+                        className="history-chevron"
+                        data-open={expanded}
+                        size={20}
+                      />
+                    </button>
+                    {expanded && (
+                      <div className="history-details">
+                        <div className="history-meta">
+                          <span>{session.teams.length} teams</span>
+                          <span>{session.inputMode.toLowerCase()} input</span>
+                          <span>
+                            {session.scoringPreset.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        <div className="fixture-list">
+                          {sortedMatches.map((fixture) => (
+                            <div className="fixture-row" key={fixture.id}>
+                              <span>R{fixture.round}</span>
+                              <b>
+                                {teamNames.get(fixture.homeTeamId) ?? "TBD"}
+                              </b>
+                              <strong>
+                                {fixture.status === "CONFIRMED"
+                                  ? `${fixture.homeGames}–${fixture.awayGames}`
+                                  : "vs"}
+                              </strong>
+                              <b>
+                                {teamNames.get(fixture.awayTeamId) ?? "TBD"}
+                              </b>
+                              <span className="pill">
+                                {fixture.status
+                                  .toLowerCase()
+                                  .replaceAll("_", " ")}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="history-actions">
+                          {latestMatch && (
+                            <button
+                              className="btn"
+                              onClick={() => openMatch(latestMatch.id)}
+                            >
+                              {session.status === "ACTIVE"
+                                ? "Resume session"
+                                : "Open session"}
+                              <ArrowRight size={18} />
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => shareSavedSession(session)}
+                          >
+                            Share recap
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+      {tab === "league" && (
+        <section className="card league-section">
+          <div className="section-heading">
+            <div>
+              <span className="kicker">THE CLUB TABLE</span>
+              <h2>League standings</h2>
+              <p>
+                Confirmed matches from this list become league points
+                automatically. Wins lead, then games difference and win rate.
               </p>
             </div>
             <button className="btn btn-secondary" onClick={loadStats}>
-              Refresh
+              <Medal size={18} /> Refresh table
             </button>
+          </div>
+          <div className="league-filters grid-2 grid">
+            <label>
+              From
+              <input
+                className="field"
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+              />
+            </label>
+            <label>
+              To
+              <input
+                className="field"
+                type="date"
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+              />
+            </label>
+          </div>
+          {leagueTable.length === 0 ? (
+            <div className="league-empty">
+              <Medal size={46} />
+              <h3>No league results yet.</h3>
+              <p>Confirm a match and the first table will appear here.</p>
+            </div>
+          ) : (
+            <div className="league-table-wrap">
+              <table className="league-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Player</th>
+                    <th>Played</th>
+                    <th>Won</th>
+                    <th>Lost</th>
+                    <th>Games +/-</th>
+                    <th>Win rate</th>
+                    <th>Form</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leagueTable.map((player, index) => (
+                    <tr key={player.id}>
+                      <td>
+                        <span className="league-rank">{index + 1}</span>
+                      </td>
+                      <td>
+                        <b>{player.name}</b>
+                      </td>
+                      <td>{player.wins + player.losses}</td>
+                      <td>{player.wins}</td>
+                      <td>{player.losses}</td>
+                      <td>
+                        {player.gamesDifferential > 0 ? "+" : ""}
+                        {player.gamesDifferential}
+                      </td>
+                      <td>{(player.winRate * 100).toFixed(0)}%</td>
+                      <td>
+                        <span className="form-dots">
+                          {player.rolling10.slice(-5).map((won, formIndex) => (
+                            <i key={formIndex} data-win={won}>
+                              {won ? "W" : "L"}
+                            </i>
+                          ))}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+      {tab === "stats" && (
+        <section className="card stats-section">
+          <div className="section-heading">
+            <div>
+              <span className="kicker">THE RECEIPTS NEVER LIE</span>
+              <h2>Player statistics</h2>
+              <p>
+                Form, streaks and partner chemistry. Group-chat excuses sold
+                separately.
+              </p>
+            </div>
+            <button className="btn btn-secondary" onClick={loadStats}>
+              <BarChart3 size={18} /> Refresh
+            </button>
+          </div>
+          <div className="league-filters grid-2 grid">
+            <label>
+              From
+              <input
+                className="field"
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+              />
+            </label>
+            <label>
+              To
+              <input
+                className="field"
+                type="date"
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+              />
+            </label>
           </div>
           {!stats ? (
             <p>Load the dashboard to see confirmed history.</p>
           ) : (
             <>
-              <p className="bg-mint rounded-xl p-3 text-sm">
+              <p className="coverage-card">
                 <b>Clutch coverage:</b> {stats.coverage.pointModeMatches}{" "}
                 point-mode matches out of {stats.coverage.totalMatches} total.
               </p>
               <div className="grid-3 grid">
                 {stats.players.map((player) => (
-                  <article
-                    key={player.id}
-                    className="rounded-xl border border-[#e1e8df] p-4"
-                  >
+                  <article key={player.id} className="stat-card">
                     <h3 className="mt-0">{player.name}</h3>
                     <p className="text-2xl font-black">
                       {player.wins}–{player.losses}

@@ -1,22 +1,30 @@
 import { expect, test } from "@playwright/test";
 
-test("smoke: shows the mobile-first roster experience", async ({ page }) => {
+test("introduces the app before opening the roster", async ({ page }) => {
   await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Your whole club night, in one place." }),
+  ).toBeVisible();
+  for (let step = 0; step < 3; step += 1)
+    await page.getByRole("button", { name: "Show me" }).click();
+  await page.getByRole("button", { name: "Let's play" }).click();
   await expect(page.getByText("Your court, organised.")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Edit rating for Youssef" }),
+  ).toBeVisible();
 });
 
 test("runs a persistent race-to-three session and exposes stats", async ({
   page,
 }) => {
+  await page.addInitScript(() =>
+    window.localStorage.setItem("padel-onboarding-v1", "done"),
+  );
   await page.goto("/");
   for (const name of ["Youssef", "Saif", "Uthman", "Todimu"]) {
-    await page
-      .getByText(name, { exact: true })
-      .locator("..")
-      .getByRole("checkbox")
-      .check();
+    await page.getByRole("checkbox", { name, exact: true }).check();
   }
-  await page.getByRole("button", { name: "teams" }).click();
+  await page.getByRole("button", { name: "teams", exact: true }).click();
   await page.getByLabel("Preset").selectOption("RACE_TO_3");
   await page.getByLabel("Input").selectOption("GAMES");
   await page.getByRole("button", { name: "Auto-balance" }).click();
@@ -51,6 +59,8 @@ test("runs a persistent race-to-three session and exposes stats", async ({
   await expect(
     page.getByText(/LIVE|AWAITING CONFIRMATION/i).first(),
   ).toBeVisible();
+  await expect(page.getByText(/wins 3–0!/i)).toBeVisible();
+  await expect(page.getByText(/result is saved/i)).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Confirm result" }),
   ).toBeVisible();
@@ -66,7 +76,7 @@ test("runs a persistent race-to-three session and exposes stats", async ({
       .first(),
   ).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "score" }).click();
+  await page.getByRole("button", { name: "score", exact: true }).click();
   await expect(page.getByText("Recent sessions")).toBeVisible();
   await page
     .getByText(/Friday Padel session/i)
@@ -75,7 +85,15 @@ test("runs a persistent race-to-three session and exposes stats", async ({
   await expect(
     page.getByRole("button", { name: "Share session" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "stats" }).click();
+  await page.getByRole("button", { name: "history", exact: true }).click();
+  await expect(page.getByText("Past games", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Friday Padel session history" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Open session" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "stats", exact: true }).click();
   await expect(page.getByText("Player statistics")).toBeVisible();
   await expect(
     page
@@ -83,5 +101,23 @@ test("runs a persistent race-to-three session and exposes stats", async ({
       .locator("..")
       .getByText(/\d+–\d+|\d+-\d+/)
       .first(),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "league", exact: true }).click();
+  await expect(page.getByText("League standings")).toBeVisible();
+  await expect(page.getByRole("table").getByText("Youssef")).toBeVisible();
+});
+
+test("starts a saved quick kickoff with four players", async ({ page }) => {
+  await page.addInitScript(() =>
+    window.localStorage.setItem("padel-onboarding-v1", "done"),
+  );
+  await page.goto("/");
+  for (const name of ["Youssef", "Saif", "Uthman", "Todimu"]) {
+    await page.getByRole("checkbox", { name, exact: true }).check();
+  }
+  await page.getByRole("button", { name: /Kick off now/i }).click();
+  await expect(page.getByText("Every tap saves")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /wins game/i }).first(),
   ).toBeVisible();
 });
